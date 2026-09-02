@@ -69,6 +69,9 @@ class MainActivity : Activity(), NfcAdapter.ReaderCallback {
             allowContentAccess = false
             mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_NEVER_ALLOW
             userAgentString = "$userAgentString KeloIDAndroid/2.0"
+            useWideViewPort = true
+            loadWithOverviewMode = true
+            textZoom = 100
         }
 
         webView.addJavascriptInterface(KeloNfcJavascriptBridge(), "KeloNativeNfc")
@@ -85,7 +88,10 @@ class MainActivity : Activity(), NfcAdapter.ReaderCallback {
             override fun onPageFinished(view: WebView, url: String) {
                 super.onPageFinished(view, url)
                 val host = Uri.parse(url).host?.lowercase()
-                if (host != null && host in ALLOWED_HOSTS) injectNfcBridge()
+                if (host != null && host in ALLOWED_HOSTS) {
+                    injectResponsiveMobileNavigation()
+                    injectNfcBridge()
+                }
             }
         }
 
@@ -112,6 +118,164 @@ class MainActivity : Activity(), NfcAdapter.ReaderCallback {
     @Deprecated("Deprecated in Java")
     override fun onBackPressed() {
         if (::webView.isInitialized && webView.canGoBack()) webView.goBack() else super.onBackPressed()
+    }
+
+    /**
+     * Kelo ID est rendu dans une WebView. Certaines versions du site peuvent
+     * exposer une barre de navigation flottante dimensionnée pour desktop.
+     * On applique donc une couche responsive uniquement aux navigations qui
+     * sont réellement ancrées en bas de l'écran. Les autres menus du site ne
+     * sont pas touchés.
+     */
+    private fun injectResponsiveMobileNavigation() {
+        val script = """
+            (function () {
+              var viewport = document.querySelector('meta[name="viewport"]');
+              if (!viewport) {
+                viewport = document.createElement('meta');
+                viewport.name = 'viewport';
+                document.head.appendChild(viewport);
+              }
+              viewport.content = 'width=device-width, initial-scale=1, viewport-fit=cover';
+
+              var styleId = 'kelo-id-native-responsive-nav';
+              if (!document.getElementById(styleId)) {
+                var style = document.createElement('style');
+                style.id = styleId;
+                style.textContent = `
+                  html, body { max-width: 100% !important; overflow-x: hidden !important; }
+
+                  @media (max-width: 1024px) {
+                    .kelo-id-mobile-floating-nav {
+                      position: fixed !important;
+                      left: 50% !important;
+                      right: auto !important;
+                      bottom: max(12px, env(safe-area-inset-bottom)) !important;
+                      transform: translateX(-50%) !important;
+                      width: calc(100% - 24px) !important;
+                      max-width: 680px !important;
+                      min-width: 0 !important;
+                      min-height: 64px !important;
+                      height: auto !important;
+                      padding: 8px 10px !important;
+                      margin: 0 !important;
+                      border-radius: 24px !important;
+                      border: 1px solid rgba(255,255,255,.42) !important;
+                      background: rgba(255,255,255,.78) !important;
+                      -webkit-backdrop-filter: blur(22px) saturate(155%) !important;
+                      backdrop-filter: blur(22px) saturate(155%) !important;
+                      box-shadow: 0 14px 42px rgba(27,20,58,.20) !important;
+                      display: flex !important;
+                      align-items: center !important;
+                      justify-content: space-around !important;
+                      gap: 4px !important;
+                      z-index: 2147483000 !important;
+                      overflow: visible !important;
+                    }
+
+                    .kelo-id-mobile-floating-nav > * {
+                      min-width: 0 !important;
+                      max-width: none !important;
+                      flex: 1 1 0 !important;
+                    }
+
+                    .kelo-id-mobile-floating-nav a,
+                    .kelo-id-mobile-floating-nav button {
+                      min-width: 44px !important;
+                      min-height: 48px !important;
+                      width: auto !important;
+                      height: auto !important;
+                      padding: 7px 6px !important;
+                      margin: 0 !important;
+                      display: flex !important;
+                      flex: 1 1 0 !important;
+                      flex-direction: column !important;
+                      align-items: center !important;
+                      justify-content: center !important;
+                      gap: 3px !important;
+                      border-radius: 16px !important;
+                      line-height: 1.1 !important;
+                      font-size: 11px !important;
+                      white-space: nowrap !important;
+                      overflow: hidden !important;
+                      text-overflow: ellipsis !important;
+                    }
+
+                    .kelo-id-mobile-floating-nav svg,
+                    .kelo-id-mobile-floating-nav img {
+                      width: 24px !important;
+                      height: 24px !important;
+                      max-width: 24px !important;
+                      max-height: 24px !important;
+                      min-width: 24px !important;
+                      min-height: 24px !important;
+                      object-fit: contain !important;
+                      flex: 0 0 24px !important;
+                    }
+
+                    body { padding-bottom: calc(96px + env(safe-area-inset-bottom)) !important; }
+                  }
+
+                  @media (min-width: 600px) and (max-width: 1024px) {
+                    .kelo-id-mobile-floating-nav {
+                      width: min(72vw, 680px) !important;
+                      min-height: 70px !important;
+                      border-radius: 26px !important;
+                      padding: 9px 14px !important;
+                    }
+                    .kelo-id-mobile-floating-nav a,
+                    .kelo-id-mobile-floating-nav button {
+                      font-size: 12px !important;
+                      padding-inline: 10px !important;
+                    }
+                    .kelo-id-mobile-floating-nav svg,
+                    .kelo-id-mobile-floating-nav img {
+                      width: 26px !important;
+                      height: 26px !important;
+                      max-width: 26px !important;
+                      max-height: 26px !important;
+                      min-width: 26px !important;
+                      min-height: 26px !important;
+                    }
+                  }
+                `;
+                document.head.appendChild(style);
+              }
+
+              function markFloatingNavigation() {
+                var candidates = Array.from(document.querySelectorAll('nav, [role="navigation"]'));
+                candidates.forEach(function (node) {
+                  node.classList.remove('kelo-id-mobile-floating-nav');
+                  var cs = window.getComputedStyle(node);
+                  var rect = node.getBoundingClientRect();
+                  var anchored = cs.position === 'fixed' || cs.position === 'sticky';
+                  var nearBottom = rect.bottom >= window.innerHeight - 180 || parseFloat(cs.bottom || '9999') <= 120;
+                  var plausibleSize = rect.height > 35 && rect.height < Math.max(240, window.innerHeight * .30);
+                  if (anchored && nearBottom && plausibleSize) {
+                    node.classList.add('kelo-id-mobile-floating-nav');
+                  }
+                });
+              }
+
+              markFloatingNavigation();
+              if (!window.__keloIdResponsiveNavObserver) {
+                var queued = false;
+                var refresh = function () {
+                  if (queued) return;
+                  queued = true;
+                  requestAnimationFrame(function () {
+                    queued = false;
+                    markFloatingNavigation();
+                  });
+                };
+                window.__keloIdResponsiveNavObserver = new MutationObserver(refresh);
+                window.__keloIdResponsiveNavObserver.observe(document.documentElement, { childList: true, subtree: true });
+                window.addEventListener('resize', refresh, { passive: true });
+                window.addEventListener('orientationchange', refresh, { passive: true });
+              }
+            })();
+        """.trimIndent()
+        webView.evaluateJavascript(script, null)
     }
 
     private fun injectNfcBridge() {
