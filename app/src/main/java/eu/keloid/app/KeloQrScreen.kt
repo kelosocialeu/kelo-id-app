@@ -19,11 +19,14 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.launch
 
 @Composable
 internal fun KeloQrScreen(
@@ -35,14 +38,19 @@ internal fun KeloQrScreen(
     var code by remember { mutableStateOf<String?>(null) }
     var expiresAt by remember { mutableStateOf<String?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
-    val client = remember { AtProtoSyncClient(androidx.compose.ui.platform.LocalContext.current) }
+    val client = remember { AtProtoSyncClient(LocalContext.current) }
+    val scope = rememberCoroutineScope()
 
     fun generate() {
         loading = true
         error = null
-        kotlinx.coroutines.GlobalScope.launch(kotlinx.coroutines.Dispatchers.Main) {
+        scope.launch {
             runCatching { client.createLinkCode(session) }
-                .onSuccess { sync -> code = sync.linkCode; expiresAt = sync.linkCodeExpiresAt; onSynced(sync) }
+                .onSuccess { sync ->
+                    code = sync.linkCode
+                    expiresAt = sync.linkCodeExpiresAt
+                    onSynced(sync)
+                }
                 .onFailure { error = it.message ?: "Impossible de générer le code." }
             loading = false
         }
@@ -51,7 +59,10 @@ internal fun KeloQrScreen(
     LaunchedEffect(Unit) { generate() }
 
     Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(22.dp),
+        Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(22.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
@@ -59,14 +70,20 @@ internal fun KeloQrScreen(
         Text("Code Kelo ID", style = MaterialTheme.typography.displaySmall, fontWeight = FontWeight.Black, color = KeloInk)
         Text("Utilisez ce code pour lier Kelo ID à votre compte Kelo Social. Le code est temporaire.", color = KeloMuted)
         KeloGradientCard {
-            Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(
+                Modifier.fillMaxWidth(),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
                 Text(code ?: "••••••", color = androidx.compose.ui.graphics.Color.White, style = MaterialTheme.typography.displayMedium, fontWeight = FontWeight.Black)
                 expiresAt?.let { Text("Expire : $it", color = androidx.compose.ui.graphics.Color.White.copy(alpha = .9f)) }
             }
         }
         if (loading) CircularProgressIndicator()
         error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-        Button(onClick = { generate() }, modifier = Modifier.fillMaxWidth(), enabled = !loading) { Text("Générer un nouveau code") }
+        Button(onClick = { generate() }, modifier = Modifier.fillMaxWidth(), enabled = !loading) {
+            Text("Générer un nouveau code")
+        }
         Text("Compte : @${session.handle}", color = KeloMuted)
         TextButton(onClick = onBack) { Text("Retour") }
         Spacer(Modifier.height(20.dp))
