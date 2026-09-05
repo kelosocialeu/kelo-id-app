@@ -1,9 +1,6 @@
 package eu.keloid.app
 
-import android.app.Activity
-import android.content.Intent
 import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -19,20 +16,33 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.platform.LocalContext
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
 import kotlinx.coroutines.launch
+
+private fun extractLoginChallenge(raw: String): String? {
+    val value = raw.trim()
+    return runCatching {
+        val url = java.net.URI(value)
+        val query = url.rawQuery.orEmpty()
+        query.split('&').firstNotNullOfOrNull { item ->
+            val parts = item.split('=', limit = 2)
+            if (parts.size == 2 && parts[0] == "challenge") parts[1] else null
+        }?.let(java.net.URLDecoder::decode)
+    }.getOrNull()?.takeIf { it.isNotBlank() }
+        ?: value.takeIf { it.matches(Regex("[A-Fa-f0-9-]{20,100}")) }
+}
 
 @Composable
 internal fun KeloQrScreen(
@@ -41,68 +51,53 @@ internal fun KeloQrScreen(
     onBack: () -> Unit
 ) {
     var loading by remember { mutableStateOf(false) }
-    var code by remember { mutableStateOf<String?>(null) }
-    var expiresAt by remember { mutableStateOf<String?>(null) }
-    var scanned by remember { mutableStateOf<String?>(null) }
+    var message by remember { mutableStateOf("Scannez le QR affiché sur Kelo Social pour connecter ce compte AT Protocol.") }
     var error by remember { mutableStateOf<String?>(null) }
-
     val context = LocalContext.current
     val client = remember(context) { AtProtoSyncClient(context) }
     val scope = rememberCoroutineScope()
 
-    fun generate() {
-        if (loading) return
+    fun approve(raw: String) {
+        val challenge = extractLoginChallenge(raw)
+        if (challenge == null) {
+            error = "Ce QR Kelo Social n’est pas reconnu."
+            return
+        }
         loading = true
         error = null
+        message = "Connexion sécurisée en cours…"
         scope.launch {
-            runCatching { client.createLinkCode(session) }
-                .onSuccess { sync ->
-                    code = sync.linkCode
-                    expiresAt = sync.linkCodeExpiresAt
-                    onSynced(sync)
+            runCatching { client.approveKeloSocialLoginQr(session, challenge) }
+                .onSuccess {
+                    message = "Connexion autorisée. Retournez sur Kelo Social : la connexion se termine automatiquement."
+                    runCatching { client.sync(session) }.onSuccess(onSynced)
                 }
-                .onFailure { error = it.message ?: "Impossible de générer le code." }
+                .onFailure { error = it.message ?: "Impossible d’autoriser la connexion." }
             loading = false
         }
     }
 
     val scanner = rememberLauncherForActivityResult(ScanContract()) { result ->
-        if (!result.contents.isNullOrBlank()) {
-            scanned = result.contents
-            val raw = result.contents.trim()
-            val extracted = Regex("(?:code=|keloid://(?:login|link)\\?code=)([0-9]{6})", RegexOption.IGNORE_CASE)
-                .find(raw)?.groupValues?.getOrNull(1)
-                ?: raw.takeIf { it.matches(Regex("[0-9]{6}")) }
-            if (extracted == null) {
-                error = "QR code Kelo ID non reconnu."
-            } else {
-                loading = true
-                error = null
-                scope.launch {
-                    runCatching { client.consumeLinkCode(session, extracted) }
-                        .onSuccess { sync -> onSynced(sync) }
-                        .onFailure { error = it.message ?: "Impossible de synchroniser ce QR code." }
-                    loading = false
-                }
-            }
-        }
+        result.contents?.takeIf { it.isNotBlank() }?.let(::approve)
     }
-
-    LaunchedEffect(session.did) { generate() }
 
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(22.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        KeloBrandHeader("Connexion et synchronisation sécurisées")
-        Text("QR code Kelo ID", style = MaterialTheme.typography.displaySmall, fontWeight = FontWeight.Black, color = KeloInk)
-        Text("Scannez un QR code Kelo ID pour lier votre compte et synchroniser son statut.", color = KeloMuted)
+        KeloBrandHeader("Connexion Kelo Social")
+        Text("Connexion par QR code", style = MaterialTheme.typography.displaySmall, fontWeight = FontWeight.Black, color = KeloInk)
+        Text(
+            "Votre compte AT Protocol déjà vérifié autorise la connexion sur un PC ou une tablette. Aucun mot de passe, code à saisir ou code à générer n’est utilisé.",
+            color = KeloMuted
+        )
 
         KeloGradientCard {
             Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(code ?: "••••••", color = androidx.compose.ui.graphics.Color.White, style = MaterialTheme.typography.displayMedium, fontWeight = FontWeight.Black)
-                expiresAt?.let { Text("Expire : $it", color = androidx.compose.ui.graphics.Color.White.copy(alpha = .9f)) }
+                Text("Kelo Social", color = Color.White, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black)
+                Text("Compte : @${session.handle}", color = Color.White.copy(alpha = .9f))
+                Text("Identité vérifiée", color = Color.White.copy(alpha = .9f))
             }
         }
 
@@ -110,7 +105,7 @@ internal fun KeloQrScreen(
             onClick = {
                 scanner.launch(
                     ScanOptions().apply {
-                        setPrompt("Placez le QR code Kelo ID dans le cadre")
+                        setPrompt("Cadrez le QR affiché sur Kelo Social")
                         setBeepEnabled(true)
                         setOrientationLocked(false)
                         setDesiredBarcodeFormats(ScanOptions.QR_CODE)
@@ -119,17 +114,13 @@ internal fun KeloQrScreen(
             },
             modifier = Modifier.fillMaxWidth(),
             enabled = !loading
-        ) { Text("Scanner un QR code") }
+        ) { Text("Scanner le QR de Kelo Social") }
 
         if (loading) CircularProgressIndicator()
-        scanned?.let { Text("QR scanné : ${it.take(80)}", color = KeloMuted, style = MaterialTheme.typography.bodySmall) }
+        Text(message, color = KeloMuted)
         error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
 
-        Button(onClick = { generate() }, modifier = Modifier.fillMaxWidth(), enabled = !loading) {
-            Text("Générer un nouveau code")
-        }
-        Text("Compte : @${session.handle}", color = KeloMuted)
-        TextButton(onClick = onBack) { Text("Retour") }
+        TextButton(onClick = onBack, enabled = !loading) { Text("Retour") }
         Spacer(Modifier.height(20.dp))
     }
 }
