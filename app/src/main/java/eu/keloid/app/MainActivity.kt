@@ -1,31 +1,30 @@
 package eu.keloid.app
 
-import android.Manifest
 import android.content.Intent
-import android.content.pm.PackageManager
 import android.net.Uri
 import android.nfc.NfcAdapter
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import androidx.activity.ComponentActivity
-import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -34,42 +33,29 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.launch
 
-/**
- * Écran principal natif de Kelo ID.
- *
- * Cette activité ne charge plus le site dans une WebView : l'interface Android
- * est native. Les parcours photo, vidéo, QR et NFC seront branchés sur les
- * boutons de cet écran au fur et à mesure de leur implémentation.
- */
 class MainActivity : ComponentActivity() {
-
-    private val nfcAdapter: NfcAdapter? by lazy {
-        NfcAdapter.getDefaultAdapter(this)
-    }
+    private val nfcAdapter: NfcAdapter? by lazy { NfcAdapter.getDefaultAdapter(this) }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-
-        val incomingUri = intent?.data
-
         setContent {
             MaterialTheme {
                 KeloIdApp(
-                    incomingUri = incomingUri,
+                    client = remember { AtProtoSyncClient(this) },
+                    incomingUri = intent?.data,
                     hasNfc = nfcAdapter != null,
                     isNfcEnabled = nfcAdapter?.isEnabled == true,
                     onOpenNfcSettings = ::openNfcSettings,
-                    onOpenKeloIdWebsite = {
-                        openWebsite("https://kelo-id.eu/")
-                    },
-                    onOpenKeloSocial = {
-                        openWebsite("https://kelosocial.eu/")
-                    }
+                    onOpenWebsite = ::openWebsite
                 )
             }
         }
@@ -82,16 +68,10 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun openNfcSettings() {
-        val action = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            Settings.Panel.ACTION_NFC
-        } else {
-            Settings.ACTION_NFC_SETTINGS
-        }
-        runCatching {
-            startActivity(Intent(action))
-        }.onFailure {
-            startActivity(Intent(Settings.ACTION_WIRELESS_SETTINGS))
-        }
+        val action = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) Settings.Panel.ACTION_NFC
+        else Settings.ACTION_NFC_SETTINGS
+        runCatching { startActivity(Intent(action)) }
+            .onFailure { startActivity(Intent(Settings.ACTION_WIRELESS_SETTINGS)) }
     }
 
     private fun openWebsite(url: String) {
@@ -101,292 +81,256 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 private fun KeloIdApp(
+    client: AtProtoSyncClient,
     incomingUri: Uri?,
     hasNfc: Boolean,
     isNfcEnabled: Boolean,
     onOpenNfcSettings: () -> Unit,
-    onOpenKeloIdWebsite: () -> Unit,
-    onOpenKeloSocial: () -> Unit
+    onOpenWebsite: (String) -> Unit
 ) {
-    var cameraGranted by remember {
-        mutableStateOf(false)
-    }
-    var microphoneGranted by remember {
-        mutableStateOf(false)
-    }
-    var notificationsGranted by remember {
-        mutableStateOf(Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU)
-    }
+    val scope = rememberCoroutineScope()
+    var session by remember { mutableStateOf(client.loadSession()) }
+    var sync by remember { mutableStateOf<VerificationSync?>(null) }
+    var loading by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
 
-    val cameraLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.RequestPermission()
-    ) { granted ->
-        cameraGranted = granted
-    }
-
-    val microphoneLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.RequestPermission()
-    ) { granted ->
-        microphoneGranted = granted
-    }
-
-    val notificationLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.RequestPermission()
-    ) { granted ->
-        notificationsGranted = granted
-    }
-
-    val context = androidx.compose.ui.platform.LocalContext.current
-
-    LaunchedEffect(Unit) {
-        cameraGranted =
-            context.checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
-        microphoneGranted =
-            context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
-        notificationsGranted =
-            Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
-                context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+    LaunchedEffect(session?.did) {
+        val current = session ?: return@LaunchedEffect
+        loading = true
+        runCatching { client.sync(current) }
+            .onSuccess { sync = it }
+            .onFailure { error = it.message }
+        loading = false
     }
 
     Scaffold { padding ->
-        KeloIdHome(
-            padding = padding,
-            incomingUri = incomingUri,
-            cameraGranted = cameraGranted,
-            microphoneGranted = microphoneGranted,
-            notificationsGranted = notificationsGranted,
-            hasNfc = hasNfc,
-            isNfcEnabled = isNfcEnabled,
-            onRequestCamera = {
-                cameraLauncher.launch(Manifest.permission.CAMERA)
-            },
-            onRequestMicrophone = {
-                microphoneLauncher.launch(Manifest.permission.RECORD_AUDIO)
-            },
-            onRequestNotifications = {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                    notificationLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        if (session == null) {
+            LoginScreen(
+                modifier = Modifier.padding(padding),
+                loading = loading,
+                error = error,
+                onLogin = { identifier, password, pdsUrl ->
+                    scope.launch {
+                        loading = true
+                        error = null
+                        runCatching { client.login(identifier, password, pdsUrl) }
+                            .onSuccess {
+                                session = it
+                                sync = runCatching { client.sync(it) }.getOrNull()
+                            }
+                            .onFailure { error = it.message ?: "Connexion impossible." }
+                        loading = false
+                    }
                 }
-            },
-            onOpenNfcSettings = onOpenNfcSettings,
-            onOpenKeloIdWebsite = onOpenKeloIdWebsite,
-            onOpenKeloSocial = onOpenKeloSocial
-        )
+            )
+        } else {
+            DashboardScreen(
+                modifier = Modifier.padding(padding),
+                session = session!!,
+                sync = sync,
+                loading = loading,
+                incomingUri = incomingUri,
+                hasNfc = hasNfc,
+                isNfcEnabled = isNfcEnabled,
+                error = error,
+                onRefresh = {
+                    scope.launch {
+                        loading = true
+                        error = null
+                        runCatching { client.sync(session!!) }
+                            .onSuccess { sync = it }
+                            .onFailure { error = it.message }
+                        loading = false
+                    }
+                },
+                onCreateLinkCode = {
+                    scope.launch {
+                        loading = true
+                        runCatching { client.createLinkCode(session!!) }
+                            .onSuccess { sync = it }
+                            .onFailure { error = it.message }
+                        loading = false
+                    }
+                },
+                onLogout = {
+                    client.clearSession()
+                    session = null
+                    sync = null
+                },
+                onOpenNfcSettings = onOpenNfcSettings,
+                onOpenWebsite = onOpenWebsite
+            )
+        }
     }
 }
 
 @Composable
-private fun KeloIdHome(
-    padding: PaddingValues,
-    incomingUri: Uri?,
-    cameraGranted: Boolean,
-    microphoneGranted: Boolean,
-    notificationsGranted: Boolean,
-    hasNfc: Boolean,
-    isNfcEnabled: Boolean,
-    onRequestCamera: () -> Unit,
-    onRequestMicrophone: () -> Unit,
-    onRequestNotifications: () -> Unit,
-    onOpenNfcSettings: () -> Unit,
-    onOpenKeloIdWebsite: () -> Unit,
-    onOpenKeloSocial: () -> Unit
+private fun LoginScreen(
+    modifier: Modifier,
+    loading: Boolean,
+    error: String?,
+    onLogin: (String, String, String) -> Unit
 ) {
+    var identifier by remember { mutableStateOf("") }
+    var password by remember { mutableStateOf("") }
+    var pdsUrl by remember { mutableStateOf("https://pds.kelosocial.eu") }
+
     Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(padding)
-            .verticalScroll(rememberScrollState())
-            .padding(20.dp),
+        modifier = modifier.fillMaxSize().padding(20.dp).verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        Spacer(modifier = Modifier.height(8.dp))
+        Spacer(Modifier.height(12.dp))
+        Text("Kelo ID", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold)
+        Text("Connectez-vous avec votre compte AT Protocol. Kelo ID vérifie ensuite automatiquement si votre compte est déjà vérifié.")
 
-        Text(
-            text = "Kelo ID",
-            style = MaterialTheme.typography.headlineLarge,
-            fontWeight = FontWeight.Bold
+        OutlinedTextField(
+            modifier = Modifier.fillMaxWidth(),
+            value = identifier,
+            onValueChange = { identifier = it },
+            label = { Text("Identifiant ou handle") },
+            singleLine = true
+        )
+        OutlinedTextField(
+            modifier = Modifier.fillMaxWidth(),
+            value = password,
+            onValueChange = { password = it },
+            label = { Text("Mot de passe ou mot de passe d'application") },
+            visualTransformation = PasswordVisualTransformation(),
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+            singleLine = true
+        )
+        OutlinedTextField(
+            modifier = Modifier.fillMaxWidth(),
+            value = pdsUrl,
+            onValueChange = { pdsUrl = it },
+            label = { Text("Serveur PDS") },
+            singleLine = true
         )
 
-        Text(
-            text = "Vérifiez votre identité et votre statut humain pour utiliser les fonctions protégées de Kelo Social.",
-            style = MaterialTheme.typography.bodyLarge
-        )
+        error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
 
-        if (incomingUri != null) {
-            Card(modifier = Modifier.fillMaxWidth()) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Text(
-                        text = "Ouvert depuis Kelo Social ou Kelo ID",
-                        fontWeight = FontWeight.SemiBold
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = incomingUri.toString(),
-                        style = MaterialTheme.typography.bodySmall
-                    )
+        Button(
+            modifier = Modifier.fillMaxWidth(),
+            enabled = !loading && identifier.isNotBlank() && password.isNotBlank(),
+            onClick = { onLogin(identifier, password, pdsUrl) }
+        ) {
+            if (loading) CircularProgressIndicator() else Text("Se connecter")
+        }
+
+        Text(
+            "Le mot de passe est envoyé directement au PDS AT Protocol. Kelo ID ne l'enregistre pas dans Supabase.",
+            style = MaterialTheme.typography.bodySmall
+        )
+    }
+}
+
+@Composable
+private fun DashboardScreen(
+    modifier: Modifier,
+    session: AtSession,
+    sync: VerificationSync?,
+    loading: Boolean,
+    incomingUri: Uri?,
+    hasNfc: Boolean,
+    isNfcEnabled: Boolean,
+    error: String?,
+    onRefresh: () -> Unit,
+    onCreateLinkCode: () -> Unit,
+    onLogout: () -> Unit,
+    onOpenNfcSettings: () -> Unit,
+    onOpenWebsite: (String) -> Unit
+) {
+    Column(
+        modifier = modifier.fillMaxSize().padding(20.dp).verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        Text("Kelo ID", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold)
+        Text("@${session.handle}", style = MaterialTheme.typography.titleMedium)
+        Text(session.did, style = MaterialTheme.typography.bodySmall)
+
+        Card(Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("État de la vérification", fontWeight = FontWeight.SemiBold)
+                when {
+                    loading && sync == null -> CircularProgressIndicator()
+                    sync?.verified == true -> {
+                        Text("Compte vérifié")
+                        Text("Kelo ID et Supabase reconnaissent déjà ce compte comme vérifié.")
+                    }
+                    else -> {
+                        Text("Vérification nécessaire")
+                        Text("Ce compte n'est pas encore marqué comme vérifié dans Kelo ID.")
+                        Button(
+                            modifier = Modifier.fillMaxWidth(),
+                            onClick = { onOpenWebsite("https://kelo-id.eu/") }
+                        ) { Text("Commencer la vérification") }
+                    }
                 }
             }
         }
 
-        Text(
-            text = "Choisir une méthode",
-            style = MaterialTheme.typography.titleLarge,
-            fontWeight = FontWeight.SemiBold
-        )
-
-        VerificationButton(
-            title = "Vérification automatique",
-            description = "Photo du document et vérification vidéo.",
-            onClick = {
-                if (!cameraGranted) onRequestCamera()
-                else if (!microphoneGranted) onRequestMicrophone()
+        sync?.linkCode?.let { code ->
+            Card(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("Code de synchronisation Kelo Social", fontWeight = FontWeight.SemiBold)
+                    Text(code, style = MaterialTheme.typography.headlineMedium)
+                    Text("Valable environ 10 minutes. Il relie ce même DID à Kelo Social sans transmettre vos documents d'identité.")
+                }
             }
-        )
+        }
 
-        VerificationButton(
-            title = "Vérification manuelle",
-            description = "Envoyer les éléments nécessaires pour une validation humaine.",
-            onClick = {
-                if (!cameraGranted) onRequestCamera()
-            }
-        )
+        Button(Modifier.fillMaxWidth(), onClick = onCreateLinkCode, enabled = !loading) {
+            Text("Générer un code pour Kelo Social")
+        }
+        OutlinedButton(Modifier.fillMaxWidth(), onClick = onRefresh, enabled = !loading) {
+            Text("Actualiser l'état")
+        }
 
-        VerificationButton(
-            title = "Scanner un QR code",
-            description = "Utiliser la caméra pour relier une vérification commencée sur Kelo Social ou Kelo ID.",
-            onClick = {
-                if (!cameraGranted) onRequestCamera()
-            }
-        )
-
-        VerificationButton(
-            title = "Carte d'identité NFC",
-            description = when {
-                !hasNfc -> "Ce téléphone ne possède pas de lecteur NFC compatible."
-                !isNfcEnabled -> "Le NFC est disponible mais désactivé."
-                else -> "Le NFC est prêt pour la lecture sécurisée de votre carte."
+        Text("Méthodes de vérification", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+        VerificationCard("Vérification automatique", "Document + contrôle vidéo.") {
+            onOpenWebsite("https://kelo-id.eu/")
+        }
+        VerificationCard("Vérification manuelle", "Envoi pour validation humaine.") {
+            onOpenWebsite("https://kelo-id.eu/")
+        }
+        VerificationCard(
+            "Carte d'identité NFC",
+            when {
+                !hasNfc -> "NFC non disponible sur cet appareil."
+                !isNfcEnabled -> "NFC disponible mais désactivé."
+                else -> "NFC prêt pour la lecture sécurisée de la carte."
             },
-            enabled = hasNfc,
-            onClick = {
-                if (!isNfcEnabled) onOpenNfcSettings()
-            }
-        )
-
-        Text(
-            text = "Autorisations",
-            style = MaterialTheme.typography.titleLarge,
-            fontWeight = FontWeight.SemiBold
-        )
-
-        PermissionCard(
-            title = "Caméra",
-            description = "Nécessaire pour les QR codes, les photos de documents et la vérification vidéo.",
-            granted = cameraGranted,
-            onRequest = onRequestCamera
-        )
-
-        PermissionCard(
-            title = "Microphone",
-            description = "Utilisé uniquement lorsque le parcours de vérification vidéo en a besoin.",
-            granted = microphoneGranted,
-            onRequest = onRequestMicrophone
-        )
-
-        PermissionCard(
-            title = "Notifications",
-            description = "Permet de vous prévenir lorsqu'une vérification est acceptée, refusée ou nécessite une action.",
-            granted = notificationsGranted,
-            onRequest = onRequestNotifications
-        )
-
-        Text(
-            text = "Liens Kelo",
-            style = MaterialTheme.typography.titleLarge,
-            fontWeight = FontWeight.SemiBold
-        )
-
-        OutlinedButton(
-            modifier = Modifier.fillMaxWidth(),
-            onClick = onOpenKeloSocial
+            enabled = hasNfc
         ) {
-            Text("Ouvrir Kelo Social")
+            if (!isNfcEnabled) onOpenNfcSettings()
         }
 
-        TextButton(
-            modifier = Modifier.fillMaxWidth(),
-            onClick = onOpenKeloIdWebsite
-        ) {
-            Text("Ouvrir le site Kelo ID")
-        }
-
-        Spacer(modifier = Modifier.height(24.dp))
-    }
-}
-
-@Composable
-private fun VerificationButton(
-    title: String,
-    description: String,
-    enabled: Boolean = true,
-    onClick: () -> Unit
-) {
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Text(
-                text = title,
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold
-            )
-            Spacer(modifier = Modifier.height(4.dp))
-            Text(
-                text = description,
-                style = MaterialTheme.typography.bodyMedium
-            )
-            Spacer(modifier = Modifier.height(12.dp))
-            Button(
-                modifier = Modifier.fillMaxWidth(),
-                enabled = enabled,
-                onClick = onClick
-            ) {
-                Text("Continuer")
-            }
-        }
-    }
-}
-
-@Composable
-private fun PermissionCard(
-    title: String,
-    description: String,
-    granted: Boolean,
-    onRequest: () -> Unit
-) {
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Text(
-                text = title,
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold
-            )
-            Spacer(modifier = Modifier.height(4.dp))
-            Text(
-                text = description,
-                style = MaterialTheme.typography.bodyMedium
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(
-                text = if (granted) "Autorisé" else "Autorisation requise",
-                fontWeight = FontWeight.Medium
-            )
-            if (!granted) {
-                Spacer(modifier = Modifier.height(10.dp))
-                OutlinedButton(
-                    modifier = Modifier.fillMaxWidth(),
-                    onClick = onRequest
-                ) {
-                    Text("Autoriser")
+        incomingUri?.let {
+            Card(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(16.dp)) {
+                    Text("Lien reçu", fontWeight = FontWeight.SemiBold)
+                    Text(it.toString(), style = MaterialTheme.typography.bodySmall)
                 }
             }
+        }
+
+        error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            TextButton(onClick = { onOpenWebsite("https://kelosocial.eu/") }) { Text("Kelo Social") }
+            TextButton(onClick = onLogout) { Text("Déconnexion") }
+        }
+        Spacer(Modifier.height(20.dp))
+    }
+}
+
+@Composable
+private fun VerificationCard(title: String, description: String, enabled: Boolean = true, onClick: () -> Unit) {
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(title, fontWeight = FontWeight.SemiBold)
+            Text(description)
+            Button(Modifier.fillMaxWidth(), enabled = enabled, onClick = onClick) { Text("Continuer") }
         }
     }
 }
