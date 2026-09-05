@@ -38,10 +38,13 @@ internal fun KeloQrScreen(
     var code by remember { mutableStateOf<String?>(null) }
     var expiresAt by remember { mutableStateOf<String?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
-    val client = remember { AtProtoSyncClient(LocalContext.current) }
+
+    val context = LocalContext.current
+    val client = remember(context) { AtProtoSyncClient(context) }
     val scope = rememberCoroutineScope()
 
     fun generate() {
+        if (loading) return
         loading = true
         error = null
         scope.launch {
@@ -56,7 +59,9 @@ internal fun KeloQrScreen(
         }
     }
 
-    LaunchedEffect(Unit) { generate() }
+    LaunchedEffect(session.did) {
+        generate()
+    }
 
     Column(
         Modifier
@@ -67,21 +72,43 @@ internal fun KeloQrScreen(
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         KeloBrandHeader("Connexion et liaison sécurisées")
-        Text("Code Kelo ID", style = MaterialTheme.typography.displaySmall, fontWeight = FontWeight.Black, color = KeloInk)
-        Text("Utilisez ce code pour lier Kelo ID à votre compte Kelo Social. Le code est temporaire.", color = KeloMuted)
+        Text(
+            "Code Kelo ID",
+            style = MaterialTheme.typography.displaySmall,
+            fontWeight = FontWeight.Black,
+            color = KeloInk
+        )
+        Text(
+            "Utilisez ce code pour lier Kelo ID à votre compte Kelo Social. Le code est temporaire.",
+            color = KeloMuted
+        )
         KeloGradientCard {
             Column(
                 Modifier.fillMaxWidth(),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Text(code ?: "••••••", color = androidx.compose.ui.graphics.Color.White, style = MaterialTheme.typography.displayMedium, fontWeight = FontWeight.Black)
-                expiresAt?.let { Text("Expire : $it", color = androidx.compose.ui.graphics.Color.White.copy(alpha = .9f)) }
+                Text(
+                    code ?: "••••••",
+                    color = androidx.compose.ui.graphics.Color.White,
+                    style = MaterialTheme.typography.displayMedium,
+                    fontWeight = FontWeight.Black
+                )
+                expiresAt?.let {
+                    Text(
+                        "Expire : $it",
+                        color = androidx.compose.ui.graphics.Color.White.copy(alpha = .9f)
+                    )
+                }
             }
         }
         if (loading) CircularProgressIndicator()
         error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-        Button(onClick = { generate() }, modifier = Modifier.fillMaxWidth(), enabled = !loading) {
+        Button(
+            onClick = { generate() },
+            modifier = Modifier.fillMaxWidth(),
+            enabled = !loading
+        ) {
             Text("Générer un nouveau code")
         }
         Text("Compte : @${session.handle}", color = KeloMuted)
