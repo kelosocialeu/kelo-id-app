@@ -59,6 +59,8 @@ dependencies {
     debugImplementation("androidx.compose.ui:ui-tooling")
 
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    implementation("androidx.security:security-crypto:1.1.0-alpha06")
 
     implementation("org.jmrtd:jmrtd:0.7.35")
     implementation("net.sf.scuba:scuba-sc-android:0.0.23")
