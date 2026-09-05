@@ -36,21 +36,49 @@ internal fun NfcVerificationScreen(
     var can by remember { mutableStateOf("") }
 
     Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp),
+        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         Text("Lecture NFC", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
-        OutlinedTextField(Modifier.fillMaxWidth(), country, { country = it.uppercase() }, label = { Text("Pays (BE, FR, ...)") }, singleLine = true)
-        OutlinedTextField(Modifier.fillMaxWidth(), documentNumber, { documentNumber = it }, label = { Text("Numéro du document") }, singleLine = true)
-        OutlinedTextField(Modifier.fillMaxWidth(), birthDate, { birthDate = it }, label = { Text("Date de naissance (AAAA-MM-JJ)") }, singleLine = true)
-        OutlinedTextField(Modifier.fillMaxWidth(), expiryDate, { expiryDate = it }, label = { Text("Date d'expiration (AAAA-MM-JJ)") }, singleLine = true)
+        OutlinedTextField(
+            value = country,
+            onValueChange = { country = it.uppercase() },
+            modifier = Modifier.fillMaxWidth(),
+            label = { Text("Pays (BE, FR, ...)") },
+            singleLine = true
+        )
+        OutlinedTextField(
+            value = documentNumber,
+            onValueChange = { documentNumber = it },
+            modifier = Modifier.fillMaxWidth(),
+            label = { Text("Numéro du document") },
+            singleLine = true
+        )
+        OutlinedTextField(
+            value = birthDate,
+            onValueChange = { birthDate = it },
+            modifier = Modifier.fillMaxWidth(),
+            label = { Text("Date de naissance (AAAA-MM-JJ)") },
+            singleLine = true
+        )
+        OutlinedTextField(
+            value = expiryDate,
+            onValueChange = { expiryDate = it },
+            modifier = Modifier.fillMaxWidth(),
+            label = { Text("Date d'expiration (AAAA-MM-JJ)") },
+            singleLine = true
+        )
         if (country.uppercase() == "FR") {
-            OutlinedTextField(Modifier.fillMaxWidth(), can, { can = it }, label = { Text("CAN") }, singleLine = true)
+            OutlinedTextField(
+                value = can,
+                onValueChange = { can = it },
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("CAN") },
+                singleLine = true
+            )
         }
         Text(status ?: "Renseignez les champs puis placez la carte contre le téléphone.")
         Button(
-            Modifier.fillMaxWidth(),
-            enabled = !busy && country.isNotBlank() && documentNumber.isNotBlank() && birthDate.length == 10 && expiryDate.length == 10,
             onClick = {
                 onStart(
                     IdentityAccessCredentials(
@@ -61,7 +89,9 @@ internal fun NfcVerificationScreen(
                         can = can.trim().takeIf { it.isNotBlank() }
                     )
                 )
-            }
+            },
+            modifier = Modifier.fillMaxWidth(),
+            enabled = !busy && country.isNotBlank() && documentNumber.isNotBlank() && birthDate.length == 10 && expiryDate.length == 10
         ) { Text(if (busy) "Lecture en cours…" else "Démarrer") }
         TextButton(onClick = onBack) { Text("Retour") }
     }
