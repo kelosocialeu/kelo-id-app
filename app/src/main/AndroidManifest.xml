@@ -1,26 +1,78 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.NFC" />
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
-    <uses-feature android:name="android.hardware.nfc" android:required="false" />
-    <uses-feature android:name="android.hardware.camera.any" android:required="false" />
+    <uses-feature
+        android:name="android.hardware.nfc"
+        android:required="false" />
+
+    <uses-feature
+        android:name="android.hardware.camera.any"
+        android:required="false" />
 
     <application
         android:allowBackup="false"
         android:label="Kelo ID"
         android:usesCleartextTraffic="false"
         android:theme="@style/Theme.KeloID">
+
         <activity
             android:name=".MainActivity"
             android:exported="true"
             android:screenOrientation="portrait">
+
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+
+            <!-- Lien personnalisé utilisable par Kelo Social. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data
+                    android:scheme="keloid"
+                    android:host="verify" />
+            </intent-filter>
+
+            <!-- Liens HTTPS Kelo ID. -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data
+                    android:scheme="https"
+                    android:host="kelo-id.eu"
+                    android:pathPrefix="/app" />
+                <data
+                    android:scheme="https"
+                    android:host="www.kelo-id.eu"
+                    android:pathPrefix="/app" />
+            </intent-filter>
+
+            <!-- Retour depuis Kelo Social vers Kelo ID. -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data
+                    android:scheme="https"
+                    android:host="kelosocial.eu"
+                    android:pathPrefix="/kelo-id" />
+                <data
+                    android:scheme="https"
+                    android:host="www.kelosocial.eu"
+                    android:pathPrefix="/kelo-id" />
+            </intent-filter>
+
         </activity>
+
     </application>
+
 </manifest>
