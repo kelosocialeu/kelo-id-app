@@ -1,426 +1,391 @@
 package eu.keloid.app
 
 import android.Manifest
-import android.annotation.SuppressLint
-import android.app.Activity
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.nfc.NfcAdapter
-import android.nfc.Tag
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
-import android.webkit.JavascriptInterface
-import android.webkit.PermissionRequest
-import android.webkit.ValueCallback
-import android.webkit.WebChromeClient
-import android.webkit.WebResourceRequest
-import android.webkit.WebView
-import android.webkit.WebViewClient
-import eu.keloid.nfc.IcaoMrtdReader
-import eu.keloid.nfc.IdentityAccessCredentials
-import eu.keloid.nfc.IdentityCardReaderRegistry
-import eu.keloid.nfc.NfcProofBuilder
-import eu.keloid.nfc.NfcSigningKeyManager
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.launch
-import org.json.JSONObject
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
 
 /**
- * Kelo ID Android.
+ * Écran principal natif de Kelo ID.
  *
- * Le site Kelo ID reste la source de vérité des parcours de vérification.
- * L'application fournit les capacités natives nécessaires : NFC, caméra,
- * microphone et sélection/capture des documents. Cela permet aux deux
- * parcours manuels et au parcours automatique de fonctionner dans la WebView.
+ * Cette activité ne charge plus le site dans une WebView : l'interface Android
+ * est native. Les parcours photo, vidéo, QR et NFC seront branchés sur les
+ * boutons de cet écran au fur et à mesure de leur implémentation.
  */
-class MainActivity : Activity(), NfcAdapter.ReaderCallback {
-    companion object {
-        private const val KELO_ID_URL = "https://kelo-id.eu/"
-        private val ALLOWED_HOSTS = setOf("kelo-id.eu", "www.kelo-id.eu")
-        private const val MEDIA_PERMISSION_REQUEST = 2101
-        private const val FILE_CHOOSER_REQUEST = 2102
+class MainActivity : ComponentActivity() {
+
+    private val nfcAdapter: NfcAdapter? by lazy {
+        NfcAdapter.getDefaultAdapter(this)
     }
 
-    private lateinit var webView: WebView
-    private var filePathCallback: ValueCallback<Array<Uri>>? = null
-    private val nfcAdapter: NfcAdapter? by lazy { NfcAdapter.getDefaultAdapter(this) }
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
-    private val signingKeyManager by lazy { NfcSigningKeyManager() }
-    private val proofBuilder by lazy { NfcProofBuilder(signingKeyManager) }
-    private val readerRegistry by lazy {
-        IdentityCardReaderRegistry(listOf(IcaoMrtdReader(this)))
-    }
-
-    private data class PendingRead(
-        val callbackId: String,
-        val subjectDid: String,
-        val credentials: IdentityAccessCredentials,
-    )
-
-    @Volatile
-    private var pendingRead: PendingRead? = null
-
-    @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        requestMediaPermissionsIfNeeded()
+        val incomingUri = intent?.data
 
-        webView = WebView(this)
-        setContentView(webView)
-
-        webView.settings.apply {
-            javaScriptEnabled = true
-            domStorageEnabled = true
-            databaseEnabled = true
-            allowFileAccess = false
-            allowContentAccess = true
-            mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_NEVER_ALLOW
-            userAgentString = "$userAgentString KeloIDAndroid/2.1"
-            useWideViewPort = true
-            loadWithOverviewMode = true
-            textZoom = 100
-            mediaPlaybackRequiresUserGesture = true
-        }
-
-        webView.addJavascriptInterface(KeloNfcJavascriptBridge(), "KeloNativeNfc")
-        webView.webChromeClient = object : WebChromeClient() {
-            override fun onPermissionRequest(request: PermissionRequest) {
-                runOnUiThread {
-                    val host = request.origin.host?.lowercase()
-                    if (request.origin.scheme != "https" || host == null || host !in ALLOWED_HOSTS) {
-                        request.deny()
-                        return@runOnUiThread
+        setContent {
+            MaterialTheme {
+                KeloIdApp(
+                    incomingUri = incomingUri,
+                    hasNfc = nfcAdapter != null,
+                    isNfcEnabled = nfcAdapter?.isEnabled == true,
+                    onOpenNfcSettings = ::openNfcSettings,
+                    onOpenKeloIdWebsite = {
+                        openWebsite("https://kelo-id.eu/")
+                    },
+                    onOpenKeloSocial = {
+                        openWebsite("https://kelosocial.eu/")
                     }
-
-                    val allowed = request.resources.filter { resource ->
-                        when (resource) {
-                            PermissionRequest.RESOURCE_VIDEO_CAPTURE ->
-                                Build.VERSION.SDK_INT < Build.VERSION_CODES.M || checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
-                            PermissionRequest.RESOURCE_AUDIO_CAPTURE ->
-                                Build.VERSION.SDK_INT < Build.VERSION_CODES.M || checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
-                            else -> false
-                        }
-                    }
-
-                    if (allowed.isEmpty()) request.deny() else request.grant(allowed.toTypedArray())
-                }
-            }
-
-            override fun onShowFileChooser(
-                webView: WebView?,
-                filePathCallback: ValueCallback<Array<Uri>>?,
-                fileChooserParams: FileChooserParams?,
-            ): Boolean {
-                this@MainActivity.filePathCallback?.onReceiveValue(null)
-                this@MainActivity.filePathCallback = filePathCallback
-                return try {
-                    val intent = fileChooserParams?.createIntent() ?: Intent(Intent.ACTION_GET_CONTENT).apply {
-                        type = "image/*"
-                        addCategory(Intent.CATEGORY_OPENABLE)
-                    }
-                    startActivityForResult(intent, FILE_CHOOSER_REQUEST)
-                    true
-                } catch (_: Throwable) {
-                    this@MainActivity.filePathCallback?.onReceiveValue(null)
-                    this@MainActivity.filePathCallback = null
-                    false
-                }
-            }
-        }
-
-        webView.webViewClient = object : WebViewClient() {
-            override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
-                val uri = request.url
-                val host = uri.host?.lowercase()
-                val allowed = uri.scheme == "https" && host != null && host in ALLOWED_HOSTS
-                if (allowed) return false
-                runCatching { startActivity(Intent(Intent.ACTION_VIEW, uri)) }
-                return true
-            }
-
-            override fun onPageFinished(view: WebView, url: String) {
-                super.onPageFinished(view, url)
-                val host = Uri.parse(url).host?.lowercase()
-                if (host != null && host in ALLOWED_HOSTS) {
-                    injectResponsiveMobileNavigation()
-                    injectNfcBridge()
-                }
-            }
-        }
-
-        webView.loadUrl(KELO_ID_URL)
-    }
-
-    private fun requestMediaPermissionsIfNeeded() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return
-        val missing = mutableListOf<String>()
-        if (checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) missing += Manifest.permission.CAMERA
-        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) missing += Manifest.permission.RECORD_AUDIO
-        if (missing.isNotEmpty()) requestPermissions(missing.toTypedArray(), MEDIA_PERMISSION_REQUEST)
-    }
-
-    @Deprecated("Deprecated in Java")
-    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-        if (requestCode == FILE_CHOOSER_REQUEST) {
-            val result = WebChromeClient.FileChooserParams.parseResult(resultCode, data)
-            filePathCallback?.onReceiveValue(result)
-            filePathCallback = null
-            return
-        }
-        super.onActivityResult(requestCode, resultCode, data)
-    }
-
-    override fun onResume() {
-        super.onResume()
-        if (pendingRead != null) enableReaderMode()
-    }
-
-    override fun onPause() {
-        runCatching { nfcAdapter?.disableReaderMode(this) }
-        super.onPause()
-    }
-
-    override fun onDestroy() {
-        pendingRead = null
-        filePathCallback?.onReceiveValue(null)
-        filePathCallback = null
-        webView.removeJavascriptInterface("KeloNativeNfc")
-        webView.destroy()
-        super.onDestroy()
-    }
-
-    @Deprecated("Deprecated in Java")
-    override fun onBackPressed() {
-        if (::webView.isInitialized && webView.canGoBack()) webView.goBack() else super.onBackPressed()
-    }
-
-    private fun injectResponsiveMobileNavigation() {
-        val script = """
-            (function () {
-              var viewport = document.querySelector('meta[name="viewport"]');
-              if (!viewport) {
-                viewport = document.createElement('meta');
-                viewport.name = 'viewport';
-                document.head.appendChild(viewport);
-              }
-              viewport.content = 'width=device-width, initial-scale=1, viewport-fit=cover';
-
-              var styleId = 'kelo-id-native-responsive-nav';
-              if (!document.getElementById(styleId)) {
-                var style = document.createElement('style');
-                style.id = styleId;
-                style.textContent = `
-                  html, body { max-width: 100% !important; overflow-x: hidden !important; }
-                  @media (max-width: 1024px) {
-                    .kelo-id-mobile-floating-nav {
-                      position: fixed !important;
-                      left: 50% !important;
-                      right: auto !important;
-                      bottom: max(12px, env(safe-area-inset-bottom)) !important;
-                      transform: translateX(-50%) !important;
-                      width: calc(100% - 24px) !important;
-                      max-width: 680px !important;
-                      min-width: 0 !important;
-                      min-height: 64px !important;
-                      height: auto !important;
-                      padding: 8px 10px !important;
-                      margin: 0 !important;
-                      border-radius: 24px !important;
-                      border: 1px solid rgba(255,255,255,.42) !important;
-                      background: rgba(255,255,255,.78) !important;
-                      -webkit-backdrop-filter: blur(22px) saturate(155%) !important;
-                      backdrop-filter: blur(22px) saturate(155%) !important;
-                      box-shadow: 0 14px 42px rgba(27,20,58,.20) !important;
-                      display: flex !important;
-                      align-items: center !important;
-                      justify-content: space-around !important;
-                      gap: 4px !important;
-                      z-index: 2147483000 !important;
-                      overflow: visible !important;
-                    }
-                    .kelo-id-mobile-floating-nav > * { min-width: 0 !important; max-width: none !important; flex: 1 1 0 !important; }
-                    .kelo-id-mobile-floating-nav a,
-                    .kelo-id-mobile-floating-nav button {
-                      min-width: 44px !important; min-height: 48px !important; width: auto !important; height: auto !important;
-                      padding: 7px 6px !important; margin: 0 !important; display: flex !important; flex: 1 1 0 !important;
-                      flex-direction: column !important; align-items: center !important; justify-content: center !important; gap: 3px !important;
-                      border-radius: 16px !important; line-height: 1.1 !important; font-size: 11px !important; white-space: nowrap !important;
-                      overflow: hidden !important; text-overflow: ellipsis !important;
-                    }
-                    .kelo-id-mobile-floating-nav svg,
-                    .kelo-id-mobile-floating-nav img {
-                      width: 24px !important; height: 24px !important; max-width: 24px !important; max-height: 24px !important;
-                      min-width: 24px !important; min-height: 24px !important; object-fit: contain !important; flex: 0 0 24px !important;
-                    }
-                    body { padding-bottom: calc(96px + env(safe-area-inset-bottom)) !important; }
-                  }
-                  @media (min-width: 600px) and (max-width: 1024px) {
-                    .kelo-id-mobile-floating-nav { width: min(72vw, 680px) !important; min-height: 70px !important; border-radius: 26px !important; padding: 9px 14px !important; }
-                    .kelo-id-mobile-floating-nav a,
-                    .kelo-id-mobile-floating-nav button { font-size: 12px !important; padding-inline: 10px !important; }
-                    .kelo-id-mobile-floating-nav svg,
-                    .kelo-id-mobile-floating-nav img { width: 26px !important; height: 26px !important; max-width: 26px !important; max-height: 26px !important; min-width: 26px !important; min-height: 26px !important; }
-                  }
-                `;
-                document.head.appendChild(style);
-              }
-
-              function markFloatingNavigation() {
-                var candidates = Array.from(document.querySelectorAll('nav, [role="navigation"]'));
-                candidates.forEach(function (node) {
-                  node.classList.remove('kelo-id-mobile-floating-nav');
-                  var cs = window.getComputedStyle(node);
-                  var rect = node.getBoundingClientRect();
-                  var anchored = cs.position === 'fixed' || cs.position === 'sticky';
-                  var nearBottom = rect.bottom >= window.innerHeight - 180 || parseFloat(cs.bottom || '9999') <= 120;
-                  var plausibleSize = rect.height > 35 && rect.height < Math.max(240, window.innerHeight * .30);
-                  if (anchored && nearBottom && plausibleSize) node.classList.add('kelo-id-mobile-floating-nav');
-                });
-              }
-
-              markFloatingNavigation();
-              if (!window.__keloIdResponsiveNavObserver) {
-                var queued = false;
-                var refresh = function () {
-                  if (queued) return;
-                  queued = true;
-                  requestAnimationFrame(function () { queued = false; markFloatingNavigation(); });
-                };
-                window.__keloIdResponsiveNavObserver = new MutationObserver(refresh);
-                window.__keloIdResponsiveNavObserver.observe(document.documentElement, { childList: true, subtree: true });
-                window.addEventListener('resize', refresh, { passive: true });
-                window.addEventListener('orientationchange', refresh, { passive: true });
-              }
-            })();
-        """.trimIndent()
-        webView.evaluateJavascript(script, null)
-    }
-
-    private fun injectNfcBridge() {
-        val script = """
-            (function () {
-              if (window.KeloIdNfc && window.KeloIdNfc.__nativeKeloBridge) return;
-              window.__keloNfcCallbacks = window.__keloNfcCallbacks || {};
-              window.__keloNfcResolve = function (id, json) {
-                const cb = window.__keloNfcCallbacks[id]; if (!cb) return;
-                delete window.__keloNfcCallbacks[id];
-                try { cb.resolve(JSON.parse(json)); } catch (e) { cb.reject(e); }
-              };
-              window.__keloNfcReject = function (id, message) {
-                const cb = window.__keloNfcCallbacks[id]; if (!cb) return;
-                delete window.__keloNfcCallbacks[id]; cb.reject(new Error(message || 'Lecture NFC impossible'));
-              };
-              window.KeloIdNfc = {
-                __nativeKeloBridge: true,
-                getAvailability: function () { return Promise.resolve(JSON.parse(KeloNativeNfc.getAvailability())); },
-                getDeviceSigningKey: function () { return Promise.resolve(JSON.parse(KeloNativeNfc.getDeviceSigningKey())); },
-                openNfcSettings: function () { KeloNativeNfc.openNfcSettings(); return Promise.resolve(); },
-                readIdentityCard: function (request) {
-                  return new Promise(function (resolve, reject) {
-                    const id = 'nfc_' + Date.now() + '_' + Math.random().toString(36).slice(2);
-                    window.__keloNfcCallbacks[id] = { resolve: resolve, reject: reject };
-                    KeloNativeNfc.startIdentityRead(JSON.stringify(request || {}), id);
-                  });
-                }
-              };
-            })();
-        """.trimIndent()
-        webView.evaluateJavascript(script, null)
-    }
-
-    private fun enableReaderMode() {
-        val adapter = nfcAdapter ?: return
-        if (!adapter.isEnabled) return
-        val flags = NfcAdapter.FLAG_READER_NFC_A or NfcAdapter.FLAG_READER_NFC_B or NfcAdapter.FLAG_READER_SKIP_NDEF_CHECK
-        adapter.enableReaderMode(this, this, flags, null)
-    }
-
-    override fun onTagDiscovered(tag: Tag) {
-        val request = pendingRead ?: return
-        pendingRead = null
-        scope.launch {
-            try {
-                val identity = readerRegistry.read(tag, request.credentials)
-                val proof = proofBuilder.build(request.subjectDid, identity)
-                val json = JSONObject().put("payload", proof.payload).put("signature", proof.signature).put("algorithm", proof.algorithm).put("keyId", proof.keyId).toString()
-                resolveJavascript(request.callbackId, json)
-            } catch (error: Throwable) {
-                val raw = error.message.orEmpty()
-                val friendly = when {
-                    raw.contains("connect", ignoreCase = true) -> "Connexion NFC interrompue. Gardez la carte immobile contre le téléphone jusqu’à la fin de la lecture puis réessayez."
-                    raw.contains("tag was lost", ignoreCase = true) || raw.contains("taglost", ignoreCase = true) -> "La carte a été éloignée trop tôt. Maintenez-la contre la zone NFC du téléphone jusqu’à la fin."
-                    else -> raw.ifBlank { "Cette carte d’identité NFC ne peut pas être lue par Kelo ID." }
-                }
-                rejectJavascript(request.callbackId, friendly)
-            } finally {
-                runOnUiThread { runCatching { nfcAdapter?.disableReaderMode(this@MainActivity) } }
-            }
-        }
-    }
-
-    private fun resolveJavascript(callbackId: String, json: String) {
-        runOnUiThread { webView.evaluateJavascript("window.__keloNfcResolve(${JSONObject.quote(callbackId)}, ${JSONObject.quote(json)});", null) }
-    }
-
-    private fun rejectJavascript(callbackId: String, message: String) {
-        runOnUiThread { webView.evaluateJavascript("window.__keloNfcReject(${JSONObject.quote(callbackId)}, ${JSONObject.quote(message)});", null) }
-    }
-
-    inner class KeloNfcJavascriptBridge {
-        @JavascriptInterface
-        fun getAvailability(): String {
-            val adapter = nfcAdapter
-            return JSONObject().put("supported", adapter != null).put("enabled", adapter?.isEnabled == true).put("platform", "android").toString()
-        }
-
-        @JavascriptInterface
-        fun getDeviceSigningKey(): String {
-            val key = signingKeyManager.ensureKey()
-            return JSONObject().put("keyId", key.keyId).put("publicKeyPem", key.publicKeyPem).put("algorithm", key.algorithm).put("platform", "android").put("deviceLabel", android.os.Build.MODEL).toString()
-        }
-
-        @JavascriptInterface
-        fun openNfcSettings() {
-            runOnUiThread {
-                runCatching { startActivity(Intent(Settings.ACTION_NFC_SETTINGS)) }.recoverCatching { startActivity(Intent(Settings.ACTION_WIRELESS_SETTINGS)) }
-            }
-        }
-
-        @JavascriptInterface
-        fun startIdentityRead(requestJson: String, callbackId: String) {
-            try {
-                val request = JSONObject(requestJson)
-                val subjectDid = request.optString("subjectDid").trim()
-                val issuerCountry = request.optString("issuerCountry").trim().uppercase()
-                val documentNumber = request.optString("documentNumber").trim()
-                val birthDate = request.optString("birthDate").trim()
-                val expiryDate = request.optString("expiryDate").trim()
-                val can = request.optString("can").trim().ifBlank { null }
-
-                if (subjectDid.isBlank() || !subjectDid.startsWith("did:")) throw IllegalArgumentException("Session Kelo ID invalide pour la lecture NFC.")
-                if (issuerCountry.length != 2) throw IllegalArgumentException("Sélectionnez le pays émetteur du document.")
-                if (issuerCountry == "FR") {
-                    if (can.isNullOrBlank()) throw IllegalArgumentException("Le CAN imprimé sur la CNIe française est nécessaire pour ouvrir la puce NFC.")
-                } else if (documentNumber.isBlank() || birthDate.isBlank() || expiryDate.isBlank()) {
-                    throw IllegalArgumentException("Numéro du document, date de naissance et date d’expiration sont nécessaires pour ouvrir la puce NFC.")
-                }
-
-                val adapter = nfcAdapter ?: throw IllegalStateException("Cet appareil ne possède pas de lecteur NFC.")
-                if (!adapter.isEnabled) throw IllegalStateException("Le NFC est désactivé. Activez-le dans les réglages du téléphone.")
-
-                pendingRead = PendingRead(
-                    callbackId,
-                    subjectDid,
-                    IdentityAccessCredentials(issuerCountry = issuerCountry, documentNumber = documentNumber, birthDate = birthDate, expiryDate = expiryDate, can = can),
                 )
-                runOnUiThread { enableReaderMode() }
-            } catch (error: Throwable) {
-                rejectJavascript(callbackId, error.message ?: "Impossible de démarrer la lecture NFC.")
+            }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        recreate()
+    }
+
+    private fun openNfcSettings() {
+        val action = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            Settings.Panel.ACTION_NFC
+        } else {
+            Settings.ACTION_NFC_SETTINGS
+        }
+        runCatching {
+            startActivity(Intent(action))
+        }.onFailure {
+            startActivity(Intent(Settings.ACTION_WIRELESS_SETTINGS))
+        }
+    }
+
+    private fun openWebsite(url: String) {
+        startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+    }
+}
+
+@Composable
+private fun KeloIdApp(
+    incomingUri: Uri?,
+    hasNfc: Boolean,
+    isNfcEnabled: Boolean,
+    onOpenNfcSettings: () -> Unit,
+    onOpenKeloIdWebsite: () -> Unit,
+    onOpenKeloSocial: () -> Unit
+) {
+    var cameraGranted by remember {
+        mutableStateOf(false)
+    }
+    var microphoneGranted by remember {
+        mutableStateOf(false)
+    }
+    var notificationsGranted by remember {
+        mutableStateOf(Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU)
+    }
+
+    val cameraLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        cameraGranted = granted
+    }
+
+    val microphoneLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        microphoneGranted = granted
+    }
+
+    val notificationLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        notificationsGranted = granted
+    }
+
+    val context = androidx.compose.ui.platform.LocalContext.current
+
+    LaunchedEffect(Unit) {
+        cameraGranted =
+            context.checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
+        microphoneGranted =
+            context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+        notificationsGranted =
+            Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+                context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+    }
+
+    Scaffold { padding ->
+        KeloIdHome(
+            padding = padding,
+            incomingUri = incomingUri,
+            cameraGranted = cameraGranted,
+            microphoneGranted = microphoneGranted,
+            notificationsGranted = notificationsGranted,
+            hasNfc = hasNfc,
+            isNfcEnabled = isNfcEnabled,
+            onRequestCamera = {
+                cameraLauncher.launch(Manifest.permission.CAMERA)
+            },
+            onRequestMicrophone = {
+                microphoneLauncher.launch(Manifest.permission.RECORD_AUDIO)
+            },
+            onRequestNotifications = {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    notificationLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                }
+            },
+            onOpenNfcSettings = onOpenNfcSettings,
+            onOpenKeloIdWebsite = onOpenKeloIdWebsite,
+            onOpenKeloSocial = onOpenKeloSocial
+        )
+    }
+}
+
+@Composable
+private fun KeloIdHome(
+    padding: PaddingValues,
+    incomingUri: Uri?,
+    cameraGranted: Boolean,
+    microphoneGranted: Boolean,
+    notificationsGranted: Boolean,
+    hasNfc: Boolean,
+    isNfcEnabled: Boolean,
+    onRequestCamera: () -> Unit,
+    onRequestMicrophone: () -> Unit,
+    onRequestNotifications: () -> Unit,
+    onOpenNfcSettings: () -> Unit,
+    onOpenKeloIdWebsite: () -> Unit,
+    onOpenKeloSocial: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(padding)
+            .verticalScroll(rememberScrollState())
+            .padding(20.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        Spacer(modifier = Modifier.height(8.dp))
+
+        Text(
+            text = "Kelo ID",
+            style = MaterialTheme.typography.headlineLarge,
+            fontWeight = FontWeight.Bold
+        )
+
+        Text(
+            text = "Vérifiez votre identité et votre statut humain pour utiliser les fonctions protégées de Kelo Social.",
+            style = MaterialTheme.typography.bodyLarge
+        )
+
+        if (incomingUri != null) {
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(
+                        text = "Ouvert depuis Kelo Social ou Kelo ID",
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = incomingUri.toString(),
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+            }
+        }
+
+        Text(
+            text = "Choisir une méthode",
+            style = MaterialTheme.typography.titleLarge,
+            fontWeight = FontWeight.SemiBold
+        )
+
+        VerificationButton(
+            title = "Vérification automatique",
+            description = "Photo du document et vérification vidéo.",
+            onClick = {
+                if (!cameraGranted) onRequestCamera()
+                else if (!microphoneGranted) onRequestMicrophone()
+            }
+        )
+
+        VerificationButton(
+            title = "Vérification manuelle",
+            description = "Envoyer les éléments nécessaires pour une validation humaine.",
+            onClick = {
+                if (!cameraGranted) onRequestCamera()
+            }
+        )
+
+        VerificationButton(
+            title = "Scanner un QR code",
+            description = "Utiliser la caméra pour relier une vérification commencée sur Kelo Social ou Kelo ID.",
+            onClick = {
+                if (!cameraGranted) onRequestCamera()
+            }
+        )
+
+        VerificationButton(
+            title = "Carte d'identité NFC",
+            description = when {
+                !hasNfc -> "Ce téléphone ne possède pas de lecteur NFC compatible."
+                !isNfcEnabled -> "Le NFC est disponible mais désactivé."
+                else -> "Le NFC est prêt pour la lecture sécurisée de votre carte."
+            },
+            enabled = hasNfc,
+            onClick = {
+                if (!isNfcEnabled) onOpenNfcSettings()
+            }
+        )
+
+        Text(
+            text = "Autorisations",
+            style = MaterialTheme.typography.titleLarge,
+            fontWeight = FontWeight.SemiBold
+        )
+
+        PermissionCard(
+            title = "Caméra",
+            description = "Nécessaire pour les QR codes, les photos de documents et la vérification vidéo.",
+            granted = cameraGranted,
+            onRequest = onRequestCamera
+        )
+
+        PermissionCard(
+            title = "Microphone",
+            description = "Utilisé uniquement lorsque le parcours de vérification vidéo en a besoin.",
+            granted = microphoneGranted,
+            onRequest = onRequestMicrophone
+        )
+
+        PermissionCard(
+            title = "Notifications",
+            description = "Permet de vous prévenir lorsqu'une vérification est acceptée, refusée ou nécessite une action.",
+            granted = notificationsGranted,
+            onRequest = onRequestNotifications
+        )
+
+        Text(
+            text = "Liens Kelo",
+            style = MaterialTheme.typography.titleLarge,
+            fontWeight = FontWeight.SemiBold
+        )
+
+        OutlinedButton(
+            modifier = Modifier.fillMaxWidth(),
+            onClick = onOpenKeloSocial
+        ) {
+            Text("Ouvrir Kelo Social")
+        }
+
+        TextButton(
+            modifier = Modifier.fillMaxWidth(),
+            onClick = onOpenKeloIdWebsite
+        ) {
+            Text("Ouvrir le site Kelo ID")
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
+    }
+}
+
+@Composable
+private fun VerificationButton(
+    title: String,
+    description: String,
+    enabled: Boolean = true,
+    onClick: () -> Unit
+) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = description,
+                style = MaterialTheme.typography.bodyMedium
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+            Button(
+                modifier = Modifier.fillMaxWidth(),
+                enabled = enabled,
+                onClick = onClick
+            ) {
+                Text("Continuer")
+            }
+        }
+    }
+}
+
+@Composable
+private fun PermissionCard(
+    title: String,
+    description: String,
+    granted: Boolean,
+    onRequest: () -> Unit
+) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = description,
+                style = MaterialTheme.typography.bodyMedium
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = if (granted) "Autorisé" else "Autorisation requise",
+                fontWeight = FontWeight.Medium
+            )
+            if (!granted) {
+                Spacer(modifier = Modifier.height(10.dp))
+                OutlinedButton(
+                    modifier = Modifier.fillMaxWidth(),
+                    onClick = onRequest
+                ) {
+                    Text("Autoriser")
+                }
             }
         }
     }
