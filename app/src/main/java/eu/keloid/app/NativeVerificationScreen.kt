@@ -89,40 +89,68 @@ internal fun NativeVerificationScreen(
     }
 
     Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp),
+        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         Text(
-            if (method == "automatic") "Vérification automatique" else "Vérification manuelle",
+            text = if (method == "automatic") "Vérification automatique" else "Vérification manuelle",
             style = MaterialTheme.typography.headlineMedium,
             fontWeight = FontWeight.Bold
         )
         Text("Les documents servent uniquement à la vérification. Kelo Social reçoit le statut, pas les images d'identité.")
 
         if (requestId == null) {
-            OutlinedTextField(Modifier.fillMaxWidth(), firstName, { firstName = it }, label = { Text("Prénom") }, singleLine = true)
-            OutlinedTextField(Modifier.fillMaxWidth(), lastName, { lastName = it }, label = { Text("Nom") }, singleLine = true)
-            OutlinedTextField(Modifier.fillMaxWidth(), birthDate, { birthDate = it }, label = { Text("Date de naissance (AAAA-MM-JJ)") }, singleLine = true)
-            OutlinedTextField(Modifier.fillMaxWidth(), nationality, { nationality = it }, label = { Text("Nationalité (BE, FR, ...)") }, singleLine = true)
+            OutlinedTextField(
+                value = firstName,
+                onValueChange = { firstName = it },
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("Prénom") },
+                singleLine = true
+            )
+            OutlinedTextField(
+                value = lastName,
+                onValueChange = { lastName = it },
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("Nom") },
+                singleLine = true
+            )
+            OutlinedTextField(
+                value = birthDate,
+                onValueChange = { birthDate = it },
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("Date de naissance (AAAA-MM-JJ)") },
+                singleLine = true
+            )
+            OutlinedTextField(
+                value = nationality,
+                onValueChange = { nationality = it },
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("Nationalité (BE, FR, ...)") },
+                singleLine = true
+            )
             Button(
-                Modifier.fillMaxWidth(),
-                enabled = !loading && firstName.isNotBlank() && lastName.isNotBlank() && birthDate.length == 10 && nationality.isNotBlank(),
                 onClick = {
                     scope.launch {
-                        loading = true; message = null
+                        loading = true
+                        message = null
                         runCatching { api.startRequest(session, method, firstName, lastName, birthDate, nationality) }
-                            .onSuccess { requestId = it.requestId; challenge = it.livenessChallenge }
+                            .onSuccess {
+                                requestId = it.requestId
+                                challenge = it.livenessChallenge
+                            }
                             .onFailure { message = it.message }
                         loading = false
                     }
-                }
+                },
+                modifier = Modifier.fillMaxWidth(),
+                enabled = !loading && firstName.isNotBlank() && lastName.isNotBlank() && birthDate.length == 10 && nationality.isNotBlank()
             ) { if (loading) CircularProgressIndicator() else Text("Créer la demande") }
         } else {
-            challenge?.let {
-                Card(Modifier.fillMaxWidth()) {
-                    Column(Modifier.padding(14.dp)) {
+            challenge?.let { instruction ->
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Column(modifier = Modifier.padding(14.dp)) {
                         Text("Contrôle vidéo", fontWeight = FontWeight.SemiBold)
-                        Text(it)
+                        Text(instruction)
                     }
                 }
             }
@@ -138,10 +166,11 @@ internal fun NativeVerificationScreen(
                         takePhoto.launch(pendingCapture!!)
                     }
                 },
-                onUpload = {
-                    val uri = photoUri ?: return@EvidenceCard
+                onUpload = upload@{
+                    val uri = photoUri ?: return@upload
                     scope.launch {
-                        loading = true; message = null
+                        loading = true
+                        message = null
                         runCatching { api.uploadEvidence(session, requestId!!, "document_front", uri, "image/jpeg") }
                             .onSuccess { photoUploaded = true }
                             .onFailure { message = it.message }
@@ -161,10 +190,11 @@ internal fun NativeVerificationScreen(
                         takeVideo.launch(pendingCapture!!)
                     }
                 },
-                onUpload = {
-                    val uri = videoUri ?: return@EvidenceCard
+                onUpload = upload@{
+                    val uri = videoUri ?: return@upload
                     scope.launch {
-                        loading = true; message = null
+                        loading = true
+                        message = null
                         runCatching { api.uploadEvidence(session, requestId!!, "liveness_video", uri, "video/mp4") }
                             .onSuccess { videoUploaded = true }
                             .onFailure { message = it.message }
@@ -174,28 +204,34 @@ internal fun NativeVerificationScreen(
             )
 
             Button(
-                Modifier.fillMaxWidth(),
-                enabled = !loading && photoUploaded && videoUploaded,
                 onClick = {
                     scope.launch {
-                        loading = true; message = null
+                        loading = true
+                        message = null
                         runCatching { api.finalizeRequest(session, requestId!!) }
                             .onSuccess {
                                 message = if (method == "automatic")
-                                    "Vérification envoyée. Le moteur automatique et les contrôles serveur vont traiter la demande."
+                                    "Vérification envoyée. Les contrôles serveur vont traiter la demande."
                                 else "Vérification envoyée pour validation humaine."
                                 onFinished()
                             }
                             .onFailure { message = it.message }
                         loading = false
                     }
-                }
+                },
+                modifier = Modifier.fillMaxWidth(),
+                enabled = !loading && photoUploaded && videoUploaded
             ) { if (loading) CircularProgressIndicator() else Text("Envoyer la vérification") }
         }
 
-        message?.let { Text(it, color = if (it.contains("envoyée", true)) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error) }
+        message?.let { currentMessage ->
+            Text(
+                currentMessage,
+                color = if (currentMessage.contains("envoyée", true)) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
+            )
+        }
         TextButton(onClick = onBack) { Text("Retour") }
-        Spacer(Modifier.height(24.dp))
+        Spacer(modifier = Modifier.height(24.dp))
     }
 }
 
@@ -208,8 +244,8 @@ private fun EvidenceCard(
     onCapture: () -> Unit,
     onUpload: () -> Unit
 ) {
-    Card(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(title, fontWeight = FontWeight.SemiBold)
             Text(when { uploaded -> "Envoyé"; ready -> "Prêt à envoyer"; else -> "À capturer" })
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -242,7 +278,6 @@ internal fun QrLinkButton(
         }
     }
     OutlinedButton(
-        Modifier.fillMaxWidth(),
         onClick = {
             launcher.launch(
                 ScanOptions()
@@ -250,7 +285,8 @@ internal fun QrLinkButton(
                     .setBeepEnabled(false)
                     .setOrientationLocked(true)
             )
-        }
+        },
+        modifier = Modifier.fillMaxWidth()
     ) { Text("Scanner un QR code Kelo") }
 }
 
