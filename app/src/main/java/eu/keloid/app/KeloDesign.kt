@@ -1,12 +1,15 @@
 package eu.keloid.app
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -19,8 +22,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
@@ -29,8 +34,8 @@ internal val KeloPurple = Color(0xFF6757FF)
 internal val KeloPink = Color(0xFFD343DD)
 internal val KeloInk = Color(0xFF171824)
 internal val KeloMuted = Color(0xFF707386)
-internal val KeloBackground = Color(0xFFF8F8FC)
-internal val KeloBorder = Color(0xFFE4E6EF)
+internal val KeloBackground = Color(0xFFF7F7FB)
+internal val KeloBorder = Color(0xFFFFFFFF).copy(alpha = 0.62f)
 internal const val KELO_ID_LOGO_URL = "https://kelosocial.sirv.com/logoid.png"
 
 private val scheme = lightColorScheme(
@@ -42,7 +47,7 @@ private val scheme = lightColorScheme(
     onSecondary = Color.White,
     onBackground = KeloInk,
     onSurface = KeloInk,
-    outline = KeloBorder,
+    outline = Color(0xFFE2E3EC),
     error = Color(0xFFB3261E)
 )
 
@@ -58,14 +63,32 @@ internal fun KeloPage(modifier: Modifier = Modifier, content: @Composable () -> 
             .fillMaxSize()
             .background(
                 Brush.linearGradient(
-                    colors = listOf(
-                        Color(0xFFF7F6FF),
+                    listOf(
+                        Color(0xFFF4F1FF),
                         KeloBackground,
-                        Color(0xFFFFF7FF)
+                        Color(0xFFFFF2FC)
                     )
                 )
             )
-    ) { content() }
+    ) {
+        Box(
+            Modifier
+                .size(230.dp)
+                .clip(RoundedCornerShape(120.dp))
+                .graphicsLayer(alpha = 0.22f)
+                .background(Brush.radialGradient(listOf(KeloPurple, Color.Transparent)))
+                .align(Alignment.TopEnd)
+        )
+        Box(
+            Modifier
+                .size(200.dp)
+                .clip(RoundedCornerShape(120.dp))
+                .graphicsLayer(alpha = 0.16f)
+                .background(Brush.radialGradient(listOf(KeloPink, Color.Transparent)))
+                .align(Alignment.BottomStart)
+        )
+        content()
+    }
 }
 
 @Composable
@@ -80,7 +103,7 @@ internal fun KeloBrandHeader(subtitle: String? = null) {
             contentDescription = "Logo Kelo ID",
             modifier = Modifier
                 .size(52.dp)
-                .clip(RoundedCornerShape(15.dp))
+                .clip(RoundedCornerShape(16.dp))
         )
         Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text("Kelo ID", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black)
@@ -93,10 +116,10 @@ internal fun KeloBrandHeader(subtitle: String? = null) {
 internal fun KeloCard(content: @Composable () -> Unit) {
     Card(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(26.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.White),
-        elevation = CardDefaults.cardElevation(defaultElevation = 5.dp),
-        border = androidx.compose.foundation.BorderStroke(1.dp, KeloBorder)
+        shape = RoundedCornerShape(28.dp),
+        colors = CardDefaults.cardColors(containerColor = Color.White.copy(alpha = 0.78f)),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        border = BorderStroke(1.dp, KeloBorder)
     ) {
         Box(modifier = Modifier.padding(20.dp)) { content() }
     }
@@ -107,8 +130,52 @@ internal fun KeloGradientCard(content: @Composable () -> Unit) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(28.dp))
-            .background(Brush.linearGradient(listOf(Color(0xFF5D4DF0), Color(0xFFC13ED4))))
+            .clip(RoundedCornerShape(30.dp))
+            .background(Brush.linearGradient(listOf(KeloPurple, KeloPink)))
             .padding(22.dp)
     ) { content() }
+}
+
+@Composable
+internal fun KeloGlassNavigation(
+    selected: String,
+    onSelect: (String) -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 10.dp)
+            .shadow(18.dp, RoundedCornerShape(28.dp), clip = false)
+            .clip(RoundedCornerShape(28.dp))
+            .background(Color.White.copy(alpha = 0.74f))
+            .padding(7.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceEvenly,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            GlassNavItem("home", "⌂", "Accueil", selected, onSelect)
+            GlassNavItem("verify", "✓", "Vérifier", selected, onSelect)
+            GlassNavItem("qr", "▣", "QR", selected, onSelect)
+            GlassNavItem("account", "●", "Compte", selected, onSelect)
+        }
+    }
+}
+
+@Composable
+private fun GlassNavItem(key: String, icon: String, label: String, selected: String, onSelect: (String) -> Unit) {
+    val active = selected == key
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(22.dp))
+            .background(if (active) Brush.linearGradient(listOf(KeloPurple, KeloPink)) else Brush.linearGradient(listOf(Color.Transparent, Color.Transparent)))
+            .padding(horizontal = 15.dp, vertical = 9.dp)
+    ) {
+        androidx.compose.foundation.clickable(onClick = { onSelect(key) })
+        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(icon, color = if (active) Color.White else KeloMuted, fontWeight = FontWeight.Bold)
+            Text(label, color = if (active) Color.White else KeloMuted, style = MaterialTheme.typography.labelSmall, fontWeight = if (active) FontWeight.Bold else FontWeight.Normal)
+        }
+    }
 }
