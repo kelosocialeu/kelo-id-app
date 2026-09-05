@@ -29,6 +29,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -64,7 +65,11 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContent { KeloIdTheme { KeloIdApp(remember { AtProtoSyncClient(this) }, remember { VerificationApiClient(this) }, intent?.data, nfcAdapter != null, nfcAdapter?.isEnabled == true, nfcStatus.value, nfcBusy.value, nfcSync.value, ::startNfcVerification, ::openNfcSettings, ::openWebsite) } }
+        setContent {
+            KeloIdTheme {
+                KeloIdApp(remember { AtProtoSyncClient(this) }, remember { VerificationApiClient(this) }, intent?.data, nfcAdapter != null, nfcAdapter?.isEnabled == true, nfcStatus.value, nfcBusy.value, nfcSync.value, ::startNfcVerification, ::openNfcSettings, ::openWebsite)
+            }
+        }
     }
     override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); setIntent(intent); recreate() }
     override fun onDestroy() { runCatching { nfcAdapter?.disableReaderMode(this) }; activityScope.cancel(); super.onDestroy() }
@@ -126,7 +131,15 @@ private fun KeloIdApp(client: AtProtoSyncClient, verificationApi: VerificationAp
         KeloPage(Modifier.padding(padding)) {
             val current = session
             if (current == null) {
-                LoginScreen(loading, error) { identifier, password -> scope.launch { loading = true; error = null; runCatching { client.login(identifier, password) }.onSuccess { session = it; sync = runCatching { client.sync(it) }.getOrNull() }.onFailure { error = it.message ?: "Connexion impossible." }; loading = false } }
+                LoginScreen(loading, error) { identifier, password ->
+                    scope.launch {
+                        loading = true; error = null
+                        runCatching { client.login(identifier, password) }
+                            .onSuccess { session = it; sync = runCatching { client.sync(it) }.getOrNull() }
+                            .onFailure { error = it.message ?: "Connexion impossible." }
+                        loading = false
+                    }
+                }
             } else when (page) {
                 "verify" -> VerificationHub(current, sync, hasNfc, isNfcEnabled, { page = "automatic" }, { page = "manual" }, { page = "nfc" }, onOpenNfcSettings, { page = "home" })
                 "automatic", "manual" -> NativeVerificationScreen(current, page, verificationApi, { scope.launch { sync = runCatching { client.sync(current) }.getOrNull(); page = "home" } }, { page = "verify" })
@@ -148,10 +161,10 @@ private fun LoginScreen(loading: Boolean, error: String?, onLogin: (String, Stri
         Text("Connectez-vous avec votre handle ou DID. Le PDS est détecté automatiquement.", color = KeloMuted)
         KeloCard {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                OutlinedTextField(identifier, { identifier = it }, Modifier.fillMaxWidth(), label = { Text("Handle ou DID") }, singleLine = true)
-                OutlinedTextField(password, { password = it }, Modifier.fillMaxWidth(), label = { Text("Mot de passe / mot de passe d'application") }, visualTransformation = PasswordVisualTransformation(), singleLine = true)
+                OutlinedTextField(value = identifier, onValueChange = { identifier = it }, modifier = Modifier.fillMaxWidth(), label = { Text("Handle ou DID") }, singleLine = true)
+                OutlinedTextField(value = password, onValueChange = { password = it }, modifier = Modifier.fillMaxWidth(), label = { Text("Mot de passe / mot de passe d'application") }, visualTransformation = PasswordVisualTransformation(), singleLine = true)
                 error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-                Button(onClick = { onLogin(identifier, password) }, enabled = !loading && identifier.isNotBlank() && password.isNotBlank(), Modifier.fillMaxWidth()) { if (loading) CircularProgressIndicator() else Text("Se connecter") }
+                Button(onClick = { onLogin(identifier, password) }, modifier = Modifier.fillMaxWidth(), enabled = !loading && identifier.isNotBlank() && password.isNotBlank()) { if (loading) CircularProgressIndicator() else Text("Se connecter") }
                 Text("Votre mot de passe est envoyé au PDS détecté et n'est pas stocké par Kelo ID.", color = KeloMuted, style = MaterialTheme.typography.bodySmall)
             }
         }
@@ -165,9 +178,9 @@ private fun HomeScreen(session: AtSession, sync: VerificationSync?, loading: Boo
         KeloBrandHeader("@${session.handle}")
         KeloGradientCard { Column(verticalArrangement = Arrangement.spacedBy(6.dp)) { Text(if (sync?.verified == true) "Identité vérifiée" else "Vérification nécessaire", color = Color.White, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black); Text(if (sync?.verified == true) "Votre statut est reconnu par Kelo ID et Kelo Social." else "Commencez une vérification pour activer votre identité Kelo.", color = Color.White.copy(alpha = .92f)) } }
         KeloCard { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) { Text("Compte", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold); Text(session.did, color = KeloMuted, style = MaterialTheme.typography.bodySmall); Text("PDS : ${session.pdsUrl}", color = KeloMuted, style = MaterialTheme.typography.bodySmall); Text("Statut : ${sync?.status ?: "synchronisation…"}") } }
-        Button(onClick = onVerify, Modifier.fillMaxWidth()) { Text("Vérifier mon identité") }
-        OutlinedButton(onClick = onQr, Modifier.fillMaxWidth()) { Text("Code ou QR code") }
-        OutlinedButton(onClick = onRefresh, enabled = !loading, Modifier.fillMaxWidth()) { Text(if (loading) "Synchronisation…" else "Synchroniser avec Kelo ID") }
+        Button(onClick = onVerify, modifier = Modifier.fillMaxWidth()) { Text("Vérifier mon identité") }
+        OutlinedButton(onClick = onQr, modifier = Modifier.fillMaxWidth()) { Text("Code ou QR code") }
+        OutlinedButton(onClick = onRefresh, modifier = Modifier.fillMaxWidth(), enabled = !loading) { Text(if (loading) "Synchronisation…" else "Synchroniser avec Kelo ID") }
         incomingUri?.let { Text("Lien reçu : $it", color = KeloMuted, style = MaterialTheme.typography.bodySmall) }
         error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
     }
@@ -179,9 +192,9 @@ private fun VerificationHub(session: AtSession, sync: VerificationSync?, hasNfc:
         KeloBrandHeader("Vérification d'identité")
         Text("Choisissez votre méthode", style = MaterialTheme.typography.displaySmall, fontWeight = FontWeight.Black, color = KeloInk)
         Text("La décision finale est enregistrée côté Kelo ID/Supabase et synchronisée avec votre DID.", color = KeloMuted)
-        KeloCard { Column(verticalArrangement = Arrangement.spacedBy(10.dp)) { Text("Automatique", fontWeight = FontWeight.Bold); Text("Document + contrôle vidéo/liveness.", color = KeloMuted); Button(onClick = automatic, Modifier.fillMaxWidth()) { Text("Commencer") } } }
-        KeloCard { Column(verticalArrangement = Arrangement.spacedBy(10.dp)) { Text("Manuelle", fontWeight = FontWeight.Bold); Text("Photo du document + vidéo, puis validation Kelo ID.", color = KeloMuted); Button(onClick = manual, Modifier.fillMaxWidth()) { Text("Commencer") } } }
-        KeloCard { Column(verticalArrangement = Arrangement.spacedBy(10.dp)) { Text("Carte d'identité NFC", fontWeight = FontWeight.Bold); Text(if (!hasNfc) "NFC indisponible sur cet appareil." else if (!nfcEnabled) "NFC désactivé." else "Lecture sécurisée de la puce.", color = KeloMuted); Button(onClick = { if (nfcEnabled) nfc() else openNfc() }, enabled = hasNfc, Modifier.fillMaxWidth()) { Text("Utiliser NFC") } } }
+        KeloCard { Column(verticalArrangement = Arrangement.spacedBy(10.dp)) { Text("Automatique", fontWeight = FontWeight.Bold); Text("Document + contrôle vidéo/liveness.", color = KeloMuted); Button(onClick = automatic, modifier = Modifier.fillMaxWidth()) { Text("Commencer") } } }
+        KeloCard { Column(verticalArrangement = Arrangement.spacedBy(10.dp)) { Text("Manuelle", fontWeight = FontWeight.Bold); Text("Photo du document + vidéo, puis validation Kelo ID.", color = KeloMuted); Button(onClick = manual, modifier = Modifier.fillMaxWidth()) { Text("Commencer") } } }
+        KeloCard { Column(verticalArrangement = Arrangement.spacedBy(10.dp)) { Text("Carte d'identité NFC", fontWeight = FontWeight.Bold); Text(if (!hasNfc) "NFC indisponible sur cet appareil." else if (!nfcEnabled) "NFC désactivé." else "Lecture sécurisée de la puce.", color = KeloMuted); Button(onClick = { if (nfcEnabled) nfc() else openNfc() }, modifier = Modifier.fillMaxWidth(), enabled = hasNfc) { Text("Utiliser NFC") } } }
         sync?.let { Text("Statut actuel : ${it.status}", color = KeloMuted) }
         TextButton(onClick = back) { Text("Retour") }
     }
@@ -193,8 +206,8 @@ private fun AccountScreen(session: AtSession, sync: VerificationSync?, refresh: 
         KeloBrandHeader("Mon compte")
         KeloCard { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) { Text("Identité AT Protocol", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold); Text("@${session.handle}"); Text(session.did, color = KeloMuted, style = MaterialTheme.typography.bodySmall); Text("PDS détecté automatiquement : ${session.pdsUrl}", color = KeloMuted, style = MaterialTheme.typography.bodySmall) } }
         KeloCard { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) { Text("Kelo ID", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold); Text("Statut : ${sync?.status ?: "inconnu"}"); Text("Type : ${sync?.verificationType ?: "human"}"); sync?.verifiedAt?.let { Text("Vérifié le : $it", color = KeloMuted) } } }
-        OutlinedButton(onClick = refresh, Modifier.fillMaxWidth()) { Text("Synchroniser") }
-        OutlinedButton(onClick = website, Modifier.fillMaxWidth()) { Text("Ouvrir Kelo ID sur le web") }
-        Button(onClick = logout, Modifier.fillMaxWidth()) { Text("Déconnexion") }
+        OutlinedButton(onClick = refresh, modifier = Modifier.fillMaxWidth()) { Text("Synchroniser") }
+        OutlinedButton(onClick = website, modifier = Modifier.fillMaxWidth()) { Text("Ouvrir Kelo ID sur le web") }
+        Button(onClick = logout, modifier = Modifier.fillMaxWidth()) { Text("Déconnexion") }
     }
 }
