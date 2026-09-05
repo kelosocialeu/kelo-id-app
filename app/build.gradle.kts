@@ -62,6 +62,7 @@ dependencies {
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("androidx.security:security-crypto:1.1.0-alpha06")
     implementation("com.journeyapps:zxing-android-embedded:4.3.0")
+    implementation("io.coil-kt:coil-compose:2.7.0")
 
     implementation("org.jmrtd:jmrtd:0.7.35")
     implementation("net.sf.scuba:scuba-sc-android:0.0.23")
