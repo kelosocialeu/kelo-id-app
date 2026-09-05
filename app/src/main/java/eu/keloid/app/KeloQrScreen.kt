@@ -1,5 +1,9 @@
 package eu.keloid.app
 
+import android.app.Activity
+import android.content.Intent
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -26,6 +30,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.journeyapps.barcodescanner.ScanContract
+import com.journeyapps.barcodescanner.ScanOptions
 import kotlinx.coroutines.launch
 
 @Composable
@@ -37,6 +43,7 @@ internal fun KeloQrScreen(
     var loading by remember { mutableStateOf(false) }
     var code by remember { mutableStateOf<String?>(null) }
     var expiresAt by remember { mutableStateOf<String?>(null) }
+    var scanned by remember { mutableStateOf<String?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
 
     val context = LocalContext.current
@@ -59,56 +66,66 @@ internal fun KeloQrScreen(
         }
     }
 
-    LaunchedEffect(session.did) {
-        generate()
-    }
-
-    Column(
-        Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(22.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        KeloBrandHeader("Connexion et liaison sécurisées")
-        Text(
-            "Code Kelo ID",
-            style = MaterialTheme.typography.displaySmall,
-            fontWeight = FontWeight.Black,
-            color = KeloInk
-        )
-        Text(
-            "Utilisez ce code pour lier Kelo ID à votre compte Kelo Social. Le code est temporaire.",
-            color = KeloMuted
-        )
-        KeloGradientCard {
-            Column(
-                Modifier.fillMaxWidth(),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Text(
-                    code ?: "••••••",
-                    color = androidx.compose.ui.graphics.Color.White,
-                    style = MaterialTheme.typography.displayMedium,
-                    fontWeight = FontWeight.Black
-                )
-                expiresAt?.let {
-                    Text(
-                        "Expire : $it",
-                        color = androidx.compose.ui.graphics.Color.White.copy(alpha = .9f)
-                    )
+    val scanner = rememberLauncherForActivityResult(ScanContract()) { result ->
+        if (!result.contents.isNullOrBlank()) {
+            scanned = result.contents
+            val raw = result.contents.trim()
+            val extracted = Regex("(?:code=|keloid://(?:login|link)\\?code=)([0-9]{6})", RegexOption.IGNORE_CASE)
+                .find(raw)?.groupValues?.getOrNull(1)
+                ?: raw.takeIf { it.matches(Regex("[0-9]{6}")) }
+            if (extracted == null) {
+                error = "QR code Kelo ID non reconnu."
+            } else {
+                loading = true
+                error = null
+                scope.launch {
+                    runCatching { client.consumeLinkCode(session, extracted) }
+                        .onSuccess { sync -> onSynced(sync) }
+                        .onFailure { error = it.message ?: "Impossible de synchroniser ce QR code." }
+                    loading = false
                 }
             }
         }
-        if (loading) CircularProgressIndicator()
-        error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+    }
+
+    LaunchedEffect(session.did) { generate() }
+
+    Column(
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(22.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        KeloBrandHeader("Connexion et synchronisation sécurisées")
+        Text("QR code Kelo ID", style = MaterialTheme.typography.displaySmall, fontWeight = FontWeight.Black, color = KeloInk)
+        Text("Scannez un QR code Kelo ID pour lier votre compte et synchroniser son statut.", color = KeloMuted)
+
+        KeloGradientCard {
+            Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(code ?: "••••••", color = androidx.compose.ui.graphics.Color.White, style = MaterialTheme.typography.displayMedium, fontWeight = FontWeight.Black)
+                expiresAt?.let { Text("Expire : $it", color = androidx.compose.ui.graphics.Color.White.copy(alpha = .9f)) }
+            }
+        }
+
         Button(
-            onClick = { generate() },
+            onClick = {
+                scanner.launch(
+                    ScanOptions().apply {
+                        setPrompt("Placez le QR code Kelo ID dans le cadre")
+                        setBeepEnabled(true)
+                        setOrientationLocked(false)
+                        setDesiredBarcodeFormats(ScanOptions.QR_CODE)
+                    }
+                )
+            },
             modifier = Modifier.fillMaxWidth(),
             enabled = !loading
-        ) {
+        ) { Text("Scanner un QR code") }
+
+        if (loading) CircularProgressIndicator()
+        scanned?.let { Text("QR scanné : ${it.take(80)}", color = KeloMuted, style = MaterialTheme.typography.bodySmall) }
+        error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+
+        Button(onClick = { generate() }, modifier = Modifier.fillMaxWidth(), enabled = !loading) {
             Text("Générer un nouveau code")
         }
         Text("Compte : @${session.handle}", color = KeloMuted)
