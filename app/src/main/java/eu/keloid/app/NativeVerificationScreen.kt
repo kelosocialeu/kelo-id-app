@@ -17,7 +17,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -31,6 +30,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -82,6 +82,7 @@ internal fun NativeVerificationScreen(
         requestCamera.launch(Manifest.permission.CAMERA)
         return false
     }
+
     fun ensureMic(): Boolean {
         if (context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) return true
         requestMic.launch(Manifest.permission.RECORD_AUDIO)
@@ -89,68 +90,85 @@ internal fun NativeVerificationScreen(
     }
 
     Column(
-        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 20.dp, vertical = 24.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        Text(
-            text = if (method == "automatic") "Vérification automatique" else "Vérification manuelle",
-            style = MaterialTheme.typography.headlineMedium,
-            fontWeight = FontWeight.Bold
+        KeloBrandHeader(
+            subtitle = if (method == "automatic") "Vérification automatique" else "Vérification manuelle"
         )
-        Text("Les documents servent uniquement à la vérification. Kelo Social reçoit le statut, pas les images d'identité.")
+        Text(
+            if (method == "automatic") "Vérifiez votre identité automatiquement" else "Envoyez votre vérification",
+            style = MaterialTheme.typography.displaySmall,
+            fontWeight = FontWeight.Black,
+            color = KeloInk
+        )
+        Text(
+            "Vos documents servent uniquement à la vérification. Kelo Social reçoit votre statut, jamais les images d'identité.",
+            color = KeloMuted
+        )
 
         if (requestId == null) {
-            OutlinedTextField(
-                value = firstName,
-                onValueChange = { firstName = it },
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text("Prénom") },
-                singleLine = true
-            )
-            OutlinedTextField(
-                value = lastName,
-                onValueChange = { lastName = it },
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text("Nom") },
-                singleLine = true
-            )
-            OutlinedTextField(
-                value = birthDate,
-                onValueChange = { birthDate = it },
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text("Date de naissance (AAAA-MM-JJ)") },
-                singleLine = true
-            )
-            OutlinedTextField(
-                value = nationality,
-                onValueChange = { nationality = it },
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text("Nationalité (BE, FR, ...)") },
-                singleLine = true
-            )
-            Button(
-                onClick = {
-                    scope.launch {
-                        loading = true
-                        message = null
-                        runCatching { api.startRequest(session, method, firstName, lastName, birthDate, nationality) }
-                            .onSuccess {
-                                requestId = it.requestId
-                                challenge = it.livenessChallenge
+            KeloCard {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text("Vos informations", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                    OutlinedTextField(
+                        value = firstName,
+                        onValueChange = { firstName = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("Prénom") },
+                        singleLine = true
+                    )
+                    OutlinedTextField(
+                        value = lastName,
+                        onValueChange = { lastName = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("Nom") },
+                        singleLine = true
+                    )
+                    OutlinedTextField(
+                        value = birthDate,
+                        onValueChange = { birthDate = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("Date de naissance (AAAA-MM-JJ)") },
+                        singleLine = true
+                    )
+                    OutlinedTextField(
+                        value = nationality,
+                        onValueChange = { nationality = it.uppercase() },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("Nationalité (BE, FR, ...)") },
+                        singleLine = true
+                    )
+                    Button(
+                        onClick = {
+                            scope.launch {
+                                loading = true
+                                message = null
+                                runCatching { api.startRequest(session, method, firstName, lastName, birthDate, nationality) }
+                                    .onSuccess {
+                                        requestId = it.requestId
+                                        challenge = it.livenessChallenge
+                                    }
+                                    .onFailure { message = it.message }
+                                loading = false
                             }
-                            .onFailure { message = it.message }
-                        loading = false
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = !loading && firstName.isNotBlank() && lastName.isNotBlank() && birthDate.length == 10 && nationality.isNotBlank()
+                    ) {
+                        if (loading) CircularProgressIndicator() else Text("Commencer")
                     }
-                },
-                modifier = Modifier.fillMaxWidth(),
-                enabled = !loading && firstName.isNotBlank() && lastName.isNotBlank() && birthDate.length == 10 && nationality.isNotBlank()
-            ) { if (loading) CircularProgressIndicator() else Text("Créer la demande") }
+                }
+            }
         } else {
-            challenge?.let { instruction ->
-                Card(modifier = Modifier.fillMaxWidth()) {
-                    Column(modifier = Modifier.padding(14.dp)) {
-                        Text("Contrôle vidéo", fontWeight = FontWeight.SemiBold)
-                        Text(instruction)
+            challenge?.let {
+                KeloGradientCard {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("Contrôle vidéo", color = Color.White, fontWeight = FontWeight.Bold)
+                        Text(it, color = Color.White.copy(alpha = 0.92f))
                     }
                 }
             }
@@ -166,8 +184,8 @@ internal fun NativeVerificationScreen(
                         takePhoto.launch(pendingCapture!!)
                     }
                 },
-                onUpload = upload@{
-                    val uri = photoUri ?: return@upload
+                onUpload = {
+                    val uri = photoUri ?: return@EvidenceCard
                     scope.launch {
                         loading = true
                         message = null
@@ -190,8 +208,8 @@ internal fun NativeVerificationScreen(
                         takeVideo.launch(pendingCapture!!)
                     }
                 },
-                onUpload = upload@{
-                    val uri = videoUri ?: return@upload
+                onUpload = {
+                    val uri = videoUri ?: return@EvidenceCard
                     scope.launch {
                         loading = true
                         message = null
@@ -221,13 +239,15 @@ internal fun NativeVerificationScreen(
                 },
                 modifier = Modifier.fillMaxWidth(),
                 enabled = !loading && photoUploaded && videoUploaded
-            ) { if (loading) CircularProgressIndicator() else Text("Envoyer la vérification") }
+            ) {
+                if (loading) CircularProgressIndicator() else Text("Envoyer la vérification")
+            }
         }
 
-        message?.let { currentMessage ->
+        message?.let {
             Text(
-                currentMessage,
-                color = if (currentMessage.contains("envoyée", true)) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
+                it,
+                color = if (it.contains("envoyée", ignoreCase = true)) KeloPurple else MaterialTheme.colorScheme.error
             )
         }
         TextButton(onClick = onBack) { Text("Retour") }
@@ -244,10 +264,17 @@ private fun EvidenceCard(
     onCapture: () -> Unit,
     onUpload: () -> Unit
 ) {
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(title, fontWeight = FontWeight.SemiBold)
-            Text(when { uploaded -> "Envoyé"; ready -> "Prêt à envoyer"; else -> "À capturer" })
+    KeloCard {
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            Text(
+                when {
+                    uploaded -> "Envoyé"
+                    ready -> "Prêt à envoyer"
+                    else -> "À capturer"
+                },
+                color = if (uploaded) KeloPurple else KeloMuted
+            )
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(onClick = onCapture) { Text(captureLabel) }
                 if (ready && !uploaded) Button(onClick = onUpload) { Text("Envoyer") }
@@ -277,6 +304,7 @@ internal fun QrLinkButton(
             }
         }
     }
+
     OutlinedButton(
         onClick = {
             launcher.launch(
@@ -287,7 +315,9 @@ internal fun QrLinkButton(
             )
         },
         modifier = Modifier.fillMaxWidth()
-    ) { Text("Scanner un QR code Kelo") }
+    ) {
+        Text("Scanner un QR code Kelo")
+    }
 }
 
 private fun createTempUri(context: Context, prefix: String, suffix: String): Uri {
