@@ -4,9 +4,16 @@
     <uses-permission android:name="android.permission.NFC" />
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-feature android:name="android.hardware.nfc" android:required="false" />
     <uses-feature android:name="android.hardware.camera.any" android:required="false" />
-    <application android:allowBackup="false" android:label="Kelo ID" android:usesCleartextTraffic="false" android:theme="@style/Theme.KeloID">
+    <application
+        android:allowBackup="false"
+        android:label="Kelo ID"
+        android:icon="@drawable/ic_kelo_id_launcher"
+        android:roundIcon="@drawable/ic_kelo_id_launcher"
+        android:usesCleartextTraffic="false"
+        android:theme="@style/Theme.KeloID">
         <provider android:name="androidx.core.content.FileProvider" android:authorities="${applicationId}.files" android:exported="false" android:grantUriPermissions="true">
             <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/file_paths" />
         </provider>
@@ -42,5 +49,14 @@
                 <data android:scheme="https" android:host="www.kelosocial.eu" android:pathPrefix="/kelo-id" />
             </intent-filter>
         </activity>
+        <receiver
+            android:name=".KeloBootReceiver"
+            android:enabled="true"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
     </application>
 </manifest>
