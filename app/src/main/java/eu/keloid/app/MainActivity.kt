@@ -8,8 +8,11 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Color
 import android.net.Uri
+import android.nfc.NfcAdapter
+import android.nfc.Tag
 import android.os.Build
 import android.os.Bundle
+import android.provider.Settings
 import android.webkit.CookieManager
 import android.webkit.JavascriptInterface
 import android.webkit.PermissionRequest
@@ -32,13 +35,28 @@ import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import com.google.firebase.messaging.FirebaseMessaging
+import eu.keloid.nfc.IcaoMrtdReader
+import eu.keloid.nfc.IdentityAccessCredentials
+import eu.keloid.nfc.NfcProofBuilder
+import eu.keloid.nfc.NfcSigningKeyManager
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 import org.json.JSONObject
+import java.util.UUID
 import java.util.concurrent.TimeUnit
 
 class MainActivity : ComponentActivity() {
     private lateinit var webView: WebView
+    private val nfcAdapter: NfcAdapter? by lazy { NfcAdapter.getDefaultAdapter(this) }
+    private val nfcScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var pendingWebPermission: PermissionRequest? = null
     private var pendingFileCallback: ValueCallback<Array<Uri>>? = null
+    private var activeNfcOperationId: String? = null
+    private var activeNfcCredentials: IdentityAccessCredentials? = null
+    private var activeNfcKeyManager: NfcSigningKeyManager? = null
 
     private val cameraPermissionLauncher = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         val request = pendingWebPermission
@@ -101,6 +119,7 @@ class MainActivity : ComponentActivity() {
         ViewCompat.requestApplyInsets(webView)
 
         webView.addJavascriptInterface(AndroidNotificationBridge(), "KeloAndroidNotifications")
+        webView.addJavascriptInterface(KeloIdNfcBridge(), "KeloIdNfcNative")
 
         with(webView.settings) {
             javaScriptEnabled = true
@@ -126,6 +145,7 @@ class MainActivity : ComponentActivity() {
         webView.webViewClient = object : WebViewClient() {
             override fun onPageFinished(view: WebView, url: String) {
                 super.onPageFinished(view, url)
+                installNfcJavascriptBridge()
                 pushFcmTokenToWebView()
             }
 
@@ -160,6 +180,163 @@ class MainActivity : ComponentActivity() {
         }
 
         webView.loadUrl("https://kelo-id.eu/")
+    }
+
+    private fun installNfcJavascriptBridge() {
+        if (!::webView.isInitialized) return
+        val script = """
+            (function() {
+              if (!window.KeloIdNfcNative) return;
+              window.__keloNfcPending = window.__keloNfcPending || {};
+              window.__keloNfcResolve = function(id, json, error) {
+                var pending = window.__keloNfcPending[id];
+                if (!pending) return;
+                delete window.__keloNfcPending[id];
+                if (error) pending.reject(new Error(error));
+                else {
+                  try { pending.resolve(JSON.parse(json)); }
+                  catch (e) { pending.reject(e); }
+                }
+              };
+              window.KeloIdNfc = {
+                getAvailability: async function() {
+                  return JSON.parse(window.KeloIdNfcNative.getAvailability());
+                },
+                getDeviceSigningKey: async function() {
+                  return JSON.parse(window.KeloIdNfcNative.getDeviceSigningKey());
+                },
+                readIdentityCard: function(request) {
+                  return new Promise(function(resolve, reject) {
+                    try {
+                      var id = window.KeloIdNfcNative.readIdentityCard(JSON.stringify(request));
+                      window.__keloNfcPending[id] = { resolve: resolve, reject: reject };
+                    } catch (e) { reject(e); }
+                  });
+                }
+              };
+            })();
+        """.trimIndent()
+        webView.post { webView.evaluateJavascript(script, null) }
+    }
+
+    private fun completeNfcOperation(operationId: String, proof: JSONObject? = null, error: String? = null) {
+        if (!::webView.isInitialized) return
+        val id = JSONObject.quote(operationId)
+        val json = JSONObject.quote(proof?.toString() ?: "")
+        val errorJson = error?.let(JSONObject::quote) ?: "null"
+        webView.post {
+            webView.evaluateJavascript("window.__keloNfcResolve && window.__keloNfcResolve($id,$json,$errorJson);", null)
+        }
+    }
+
+    private fun enableNfcReader(operationId: String, credentials: IdentityAccessCredentials, keyManager: NfcSigningKeyManager) {
+        val adapter = nfcAdapter
+        if (adapter == null) {
+            completeNfcOperation(operationId, error = "Ce téléphone ne possède pas de lecteur NFC compatible.")
+            return
+        }
+        if (!adapter.isEnabled) {
+            completeNfcOperation(operationId, error = "Activez le NFC dans les réglages du téléphone puis réessayez.")
+            openNfcSettings()
+            return
+        }
+
+        activeNfcOperationId = operationId
+        activeNfcCredentials = credentials
+        activeNfcKeyManager = keyManager
+        adapter.enableReaderMode(
+            this,
+            { tag -> onNfcTag(tag) },
+            NfcAdapter.FLAG_READER_NFC_A or
+                NfcAdapter.FLAG_READER_NFC_B or
+                NfcAdapter.FLAG_READER_SKIP_NDEF_CHECK,
+            null
+        )
+    }
+
+    private fun onNfcTag(tag: Tag) {
+        val operationId = activeNfcOperationId ?: return
+        val credentials = activeNfcCredentials ?: return
+        val keyManager = activeNfcKeyManager ?: return
+        runCatching { nfcAdapter?.disableReaderMode(this) }
+        activeNfcOperationId = null
+        activeNfcCredentials = null
+        activeNfcKeyManager = null
+
+        nfcScope.launch {
+            runCatching {
+                val identity = IcaoMrtdReader(this@MainActivity).read(tag, credentials)
+                NfcProofBuilder(keyManager).build(credentials.subjectDid, identity)
+            }.onSuccess { proof ->
+                val result = JSONObject()
+                    .put("payload", proof.payload)
+                    .put("signature", proof.signature)
+                    .put("algorithm", proof.algorithm)
+                    .put("keyId", proof.keyId)
+                completeNfcOperation(operationId, result)
+            }.onFailure { error ->
+                completeNfcOperation(operationId, error = error.message ?: "La lecture NFC a échoué.")
+            }
+        }
+    }
+
+    private fun openNfcSettings() {
+        val action = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) Settings.Panel.ACTION_NFC else Settings.ACTION_NFC_SETTINGS
+        runCatching { startActivity(Intent(action)) }
+            .onFailure { startActivity(Intent(Settings.ACTION_WIRELESS_SETTINGS)) }
+    }
+
+    private inner class KeloIdNfcBridge {
+        @JavascriptInterface
+        fun getAvailability(): String {
+            val supported = nfcAdapter != null
+            return JSONObject()
+                .put("supported", supported)
+                .put("enabled", supported && nfcAdapter?.isEnabled == true)
+                .put("platform", "android")
+                .toString()
+        }
+
+        @JavascriptInterface
+        fun getDeviceSigningKey(): String {
+            val key = NfcSigningKeyManager().ensureKey()
+            return JSONObject()
+                .put("keyId", key.keyId)
+                .put("publicKeyPem", key.publicKeyPem)
+                .put("algorithm", key.algorithm)
+                .put("platform", "android")
+                .put("deviceLabel", Build.MANUFACTURER + " " + Build.MODEL)
+                .toString()
+        }
+
+        @JavascriptInterface
+        fun readIdentityCard(requestJson: String): String {
+            val request = JSONObject(requestJson)
+            val subjectDid = request.optString("subjectDid").trim()
+            val issuerCountry = request.optString("issuerCountry").trim().uppercase()
+            val documentNumber = request.optString("documentNumber").trim().uppercase()
+            val birthDate = request.optString("birthDate").trim()
+            val expiryDate = request.optString("expiryDate").trim()
+            val can = request.optString("can").trim().takeIf { it.isNotBlank() }
+
+            require(subjectDid.startsWith("did:")) { "Session Kelo ID invalide." }
+            require(issuerCountry == "BE" || issuerCountry == "FR") { "Kelo ID prend en charge la Belgique et la France pour cette vérification NFC." }
+            require(documentNumber.isNotBlank()) { "Le numéro du document est requis." }
+            require(birthDate.matches(Regex("\\d{4}-\\d{2}-\\d{2}"))) { "La date de naissance est invalide." }
+            require(expiryDate.matches(Regex("\\d{4}-\\d{2}-\\d{2}"))) { "La date d'expiration est invalide." }
+            if (issuerCountry == "FR") require(!can.isNullOrBlank()) { "Le CAN de la CNIe française est requis pour la lecture NFC." }
+
+            val operationId = UUID.randomUUID().toString()
+            val credentials = IdentityAccessCredentials(
+                issuerCountry = issuerCountry,
+                documentNumber = documentNumber,
+                birthDate = birthDate,
+                expiryDate = expiryDate,
+                can = can
+            ).also { it.subjectDid = subjectDid }
+            enableNfcReader(operationId, credentials, NfcSigningKeyManager())
+            return operationId
+        }
     }
 
     private fun initializeFirebaseMessaging() {
@@ -245,8 +422,11 @@ class MainActivity : ComponentActivity() {
     override fun onDestroy() {
         pendingWebPermission?.deny(); pendingWebPermission = null
         pendingFileCallback?.onReceiveValue(null); pendingFileCallback = null
+        runCatching { nfcAdapter?.disableReaderMode(this) }
+        nfcScope.cancel()
         if (::webView.isInitialized) {
             webView.removeJavascriptInterface("KeloAndroidNotifications")
+            webView.removeJavascriptInterface("KeloIdNfcNative")
             webView.stopLoading(); webView.webChromeClient = null; webView.destroy()
         }
         super.onDestroy()
