@@ -164,7 +164,11 @@ class MainActivity : ComponentActivity() {
     private inner class AndroidNotificationBridge {
         @JavascriptInterface
         fun setSubjectDid(did: String) {
-            if (did.startsWith("did:")) getSharedPreferences("kelo_notifications", MODE_PRIVATE).edit().putString("subject_did", did).apply()
+            if (!did.startsWith("did:")) return
+            getSharedPreferences("kelo_notifications", MODE_PRIVATE).edit().putString("subject_did", did).apply()
+            // The worker is also scheduled when the DID becomes known, so closing Kelo ID
+            // does not stop notification polling after the initial login.
+            scheduleNotificationWorker()
         }
 
         @JavascriptInterface
