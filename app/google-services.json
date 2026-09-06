@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "956497774049",
+    "project_id": "kelo-id",
+    "storage_bucket": "kelo-id.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:956497774049:android:8bde66af2e010cda40fea0",
+        "android_client_info": {
+          "package_name": "eu.keloid.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDXdwBZf__PrP8wwyFR-0n7fFoOh9mbYMI"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
