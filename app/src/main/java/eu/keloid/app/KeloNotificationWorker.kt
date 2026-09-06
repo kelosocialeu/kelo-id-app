@@ -29,11 +29,11 @@ class KeloNotificationWorker(appContext: Context, params: WorkerParameters) : Co
             return@withContext Result.success()
         }
 
-        runCatching {
-            val prefs = applicationContext.getSharedPreferences("kelo_notifications", Context.MODE_PRIVATE)
-            val did = prefs.getString("subject_did", null)
-            if (did.isNullOrBlank()) return@runCatching Result.success()
+        val prefs = applicationContext.getSharedPreferences("kelo_notifications", Context.MODE_PRIVATE)
+        val did = prefs.getString("subject_did", null)
+        if (did.isNullOrBlank()) return@withContext Result.success()
 
+        runCatching {
             val url = "https://kelo-id.eu/api/notifications?did=${Uri.encode(did)}"
             val request = Request.Builder()
                 .url(url)
