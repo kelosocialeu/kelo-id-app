@@ -162,7 +162,7 @@ class MainActivity : ComponentActivity() {
                 val target = Intent(this@MainActivity, MainActivity::class.java).apply { data = url?.takeIf { it.startsWith("https://kelo-id.eu") || it.startsWith("https://www.kelo-id.eu") }?.let(Uri::parse) }
                 val pendingIntent = PendingIntent.getActivity(this@MainActivity, 1001, target, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
                 val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) android.app.Notification.Builder(this@MainActivity, "kelo_id_general") else android.app.Notification.Builder(this@MainActivity)
-                val notification = builder.setSmallIcon(eu.keloid.app.R.drawable.ic_kelo_id_notification).setContentTitle(title.take(80)).setContentText(body.take(200)).setAutoCancel(true).setContentIntent(pendingIntent).build()
+                val notification = builder.setSmallIcon(R.drawable.ic_kelo_id_notification).setContentTitle(title.take(80)).setContentText(body.take(200)).setAutoCancel(true).setContentIntent(pendingIntent).build()
                 getSystemService(NotificationManager::class.java).notify(title.hashCode(), notification)
             }
         }
@@ -173,7 +173,7 @@ class MainActivity : ComponentActivity() {
         pendingFileCallback?.onReceiveValue(null); pendingFileCallback = null
         if (::webView.isInitialized) {
             webView.removeJavascriptInterface("KeloAndroidNotifications")
-            webView.stopLoading(); webView.webChromeClient = null; webView.webViewClient = null; webView.destroy()
+            webView.stopLoading(); webView.webChromeClient = null; webView.destroy()
         }
         super.onDestroy()
     }
