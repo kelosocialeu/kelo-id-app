@@ -22,6 +22,8 @@ import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import androidx.work.ExistingPeriodicWorkPolicy
+import androidx.work.ExistingWorkPolicy
+import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import java.util.concurrent.TimeUnit
@@ -140,10 +142,14 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun scheduleNotificationWorker() {
-        val request = PeriodicWorkRequestBuilder<KeloNotificationWorker>(15, TimeUnit.MINUTES)
+        val workManager = WorkManager.getInstance(this)
+        val immediateRequest = OneTimeWorkRequestBuilder<KeloNotificationWorker>().build()
+        workManager.enqueueUniqueWork(KeloNotificationWorker.IMMEDIATE_WORK_NAME, ExistingWorkPolicy.REPLACE, immediateRequest)
+
+        val periodicRequest = PeriodicWorkRequestBuilder<KeloNotificationWorker>(15, TimeUnit.MINUTES)
             .setConstraints(KeloNotificationWorker.constraints())
             .build()
-        WorkManager.getInstance(this).enqueueUniquePeriodicWork(KeloNotificationWorker.WORK_NAME, ExistingPeriodicWorkPolicy.UPDATE, request)
+        workManager.enqueueUniquePeriodicWork(KeloNotificationWorker.WORK_NAME, ExistingPeriodicWorkPolicy.UPDATE, periodicRequest)
     }
 
     private fun createNotificationChannel() {
