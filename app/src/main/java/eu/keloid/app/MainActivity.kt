@@ -32,6 +32,7 @@ import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import com.google.firebase.messaging.FirebaseMessaging
+import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 
 class MainActivity : ComponentActivity() {
@@ -123,6 +124,11 @@ class MainActivity : ComponentActivity() {
         CookieManager.getInstance().setAcceptThirdPartyCookies(webView, false)
 
         webView.webViewClient = object : WebViewClient() {
+            override fun onPageFinished(view: WebView, url: String) {
+                super.onPageFinished(view, url)
+                pushFcmTokenToWebView()
+            }
+
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
                 val host = request.url.host?.lowercase() ?: return true
                 return if (host == "kelo-id.eu" || host == "www.kelo-id.eu") false
@@ -161,9 +167,18 @@ class MainActivity : ComponentActivity() {
             FirebaseMessaging.getInstance().token
                 .addOnSuccessListener { token ->
                     getSharedPreferences("kelo_notifications", MODE_PRIVATE).edit().putString("fcm_token", token).apply()
-                    KeloFirebaseMessagingService.registerToken(this)
+                    pushFcmTokenToWebView()
                     disableNotificationWorker()
                 }
+        }
+    }
+
+    private fun pushFcmTokenToWebView() {
+        if (!::webView.isInitialized) return
+        val token = KeloFirebaseMessagingService.currentToken(this) ?: return
+        val quotedToken = JSONObject.quote(token)
+        webView.post {
+            webView.evaluateJavascript("window.KeloIDRegisterFcmToken && window.KeloIDRegisterFcmToken($quotedToken);", null)
         }
     }
 
@@ -207,7 +222,6 @@ class MainActivity : ComponentActivity() {
         fun setSubjectDid(did: String) {
             if (!did.startsWith("did:")) return
             getSharedPreferences("kelo_notifications", MODE_PRIVATE).edit().putString("subject_did", did).apply()
-            KeloFirebaseMessagingService.registerToken(this@MainActivity)
             if (getSharedPreferences("kelo_notifications", MODE_PRIVATE).getString("fcm_token", null).isNullOrBlank()) scheduleNotificationWorker()
             else disableNotificationWorker()
         }
