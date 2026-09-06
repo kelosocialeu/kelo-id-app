@@ -40,13 +40,16 @@ class MainActivity : ComponentActivity() {
         if (cameraGranted && audioGranted) request.grant(request.resources) else request.deny()
     }
 
+    private val notificationPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { }
+
     private val fileChooserLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
         val callback = pendingFileCallback ?: return@registerForActivityResult
         pendingFileCallback = null
-        val uris = WebChromeClient.FileChooserParams.parseResult(result.resultCode, result.data)
-        callback.onReceiveValue(uris)
+        callback.onReceiveValue(WebChromeClient.FileChooserParams.parseResult(result.resultCode, result.data))
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -158,7 +161,7 @@ class MainActivity : ComponentActivity() {
 
     private fun requestNotificationPermission() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && !hasPermission(Manifest.permission.POST_NOTIFICATIONS)) {
-            registerForActivityResult(ActivityResultContracts.RequestPermission()) {}.launch(Manifest.permission.POST_NOTIFICATIONS)
+            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
     }
 
