@@ -31,15 +31,11 @@ class MainActivity : ComponentActivity() {
     private var pendingWebPermission: PermissionRequest? = null
     private var pendingFileCallback: ValueCallback<Array<Uri>>? = null
 
-    private val runtimePermissionLauncher = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { results ->
+    private val cameraPermissionLauncher = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         val request = pendingWebPermission
         pendingWebPermission = null
         if (request == null) return@registerForActivityResult
-        val needsCamera = request.resources.contains(PermissionRequest.RESOURCE_VIDEO_CAPTURE)
-        val needsAudio = request.resources.contains(PermissionRequest.RESOURCE_AUDIO_CAPTURE)
-        val cameraGranted = !needsCamera || results[Manifest.permission.CAMERA] == true || hasPermission(Manifest.permission.CAMERA)
-        val audioGranted = !needsAudio || results[Manifest.permission.RECORD_AUDIO] == true || hasPermission(Manifest.permission.RECORD_AUDIO)
-        if (cameraGranted && audioGranted) request.grant(request.resources) else request.deny()
+        if (granted && hasPermission(Manifest.permission.CAMERA)) request.grant(request.resources) else request.deny()
     }
 
     private val notificationPermissionLauncher = registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
@@ -105,11 +101,14 @@ class MainActivity : ComponentActivity() {
                 runOnUiThread {
                     val host = request.origin.host?.lowercase()
                     if (host != "kelo-id.eu" && host != "www.kelo-id.eu") { request.deny(); return@runOnUiThread }
-                    val permissions = mutableListOf<String>()
-                    if (request.resources.contains(PermissionRequest.RESOURCE_VIDEO_CAPTURE) && !hasPermission(Manifest.permission.CAMERA)) permissions += Manifest.permission.CAMERA
-                    if (request.resources.contains(PermissionRequest.RESOURCE_AUDIO_CAPTURE) && !hasPermission(Manifest.permission.RECORD_AUDIO)) permissions += Manifest.permission.RECORD_AUDIO
-                    if (permissions.isEmpty()) request.grant(request.resources)
-                    else { pendingWebPermission?.deny(); pendingWebPermission = request; runtimePermissionLauncher.launch(permissions.toTypedArray()) }
+                    val needsCamera = request.resources.contains(PermissionRequest.RESOURCE_VIDEO_CAPTURE)
+                    if (!needsCamera) { request.deny(); return@runOnUiThread }
+                    if (hasPermission(Manifest.permission.CAMERA)) request.grant(request.resources)
+                    else {
+                        pendingWebPermission?.deny()
+                        pendingWebPermission = request
+                        cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+                    }
                 }
             }
 
@@ -144,7 +143,7 @@ class MainActivity : ComponentActivity() {
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         getSystemService(NotificationManager::class.java).createNotificationChannel(
-            NotificationChannel("kelo_id_general", "Kelo ID", NotificationManager.IMPORTANCE_DEFAULT).apply { description = "Notifications importantes de Kelo ID" }
+            NotificationChannel("kelo_id_general", "Kelo ID", NotificationManager.IMPORTANCE_HIGH).apply { description = "Notifications importantes de Kelo ID" }
         )
     }
 
@@ -163,7 +162,7 @@ class MainActivity : ComponentActivity() {
                 val target = Intent(this@MainActivity, MainActivity::class.java).apply { data = url?.takeIf { it.startsWith("https://kelo-id.eu") || it.startsWith("https://www.kelo-id.eu") }?.let(Uri::parse) }
                 val pendingIntent = PendingIntent.getActivity(this@MainActivity, 1001, target, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
                 val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) android.app.Notification.Builder(this@MainActivity, "kelo_id_general") else android.app.Notification.Builder(this@MainActivity)
-                val notification = builder.setSmallIcon(android.R.drawable.ic_dialog_info).setContentTitle(title.take(80)).setContentText(body.take(200)).setAutoCancel(true).setContentIntent(pendingIntent).build()
+                val notification = builder.setSmallIcon(eu.keloid.app.R.drawable.ic_kelo_id_notification).setContentTitle(title.take(80)).setContentText(body.take(200)).setAutoCancel(true).setContentIntent(pendingIntent).build()
                 getSystemService(NotificationManager::class.java).notify(title.hashCode(), notification)
             }
         }
