@@ -19,6 +19,7 @@ import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONArray
+import org.json.JSONObject
 
 class KeloNotificationWorker(appContext: Context, params: WorkerParameters) : CoroutineWorker(appContext, params) {
     private val client = OkHttpClient()
@@ -31,40 +32,77 @@ class KeloNotificationWorker(appContext: Context, params: WorkerParameters) : Co
         runCatching {
             val prefs = applicationContext.getSharedPreferences("kelo_notifications", Context.MODE_PRIVATE)
             val did = prefs.getString("subject_did", null)
-            val url = buildString {
-                append("https://kelo-id.eu/api/notifications")
-                if (!did.isNullOrBlank()) append("?did=").append(Uri.encode(did))
-            }
-            val request = Request.Builder().url(url).get().build()
+            if (did.isNullOrBlank()) return@runCatching Result.success()
+
+            val url = "https://kelo-id.eu/api/notifications?did=${Uri.encode(did)}"
+            val request = Request.Builder()
+                .url(url)
+                .header("Cache-Control", "no-cache")
+                .get()
+                .build()
+
             client.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) return@use
                 val json = response.body?.string().orEmpty()
-                val notifications = JSONArray(org.json.JSONObject(json).optJSONArray("notifications")?.toString() ?: "[]")
+                val notifications = JSONArray(JSONObject(json).optJSONArray("notifications")?.toString() ?: "[]")
                 if (notifications.length() == 0) return@use
-                val newest = notifications.getJSONObject(0)
-                val id = newest.optString("id")
-                if (id.isBlank() || id == prefs.getString("last_id", null)) return@use
 
-                val title = newest.optString("title", "Kelo ID")
-                val body = newest.optString("body", "Nouvelle notification Kelo ID")
-                val targetUrl = newest.optString("url", "https://kelo-id.eu/")
-                val intent = Intent(applicationContext, MainActivity::class.java).apply {
-                    data = targetUrl.takeIf { it.startsWith("https://kelo-id.eu") || it.startsWith("https://www.kelo-id.eu") }?.let(Uri::parse)
+                val seen = prefs.getStringSet("seen_ids", emptySet())?.toMutableSet() ?: mutableSetOf()
+                val newItems = mutableListOf<JSONObject>()
+
+                for (index in 0 until notifications.length()) {
+                    val item = notifications.getJSONObject(index)
+                    val id = item.optString("id")
+                    if (id.isNotBlank() && !seen.contains(id)) newItems += item
                 }
-                val pendingIntent = PendingIntent.getActivity(applicationContext, 2001, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-                val notification = NotificationCompat.Builder(applicationContext, "kelo_id_general")
-                    .setSmallIcon(android.R.drawable.ic_dialog_info)
-                    .setContentTitle(title.take(80))
-                    .setContentText(body.take(200))
-                    .setStyle(NotificationCompat.BigTextStyle().bigText(body.take(1000)))
-                    .setAutoCancel(true)
-                    .setContentIntent(pendingIntent)
-                    .build()
-                applicationContext.getSystemService(NotificationManager::class.java).notify(id.hashCode(), notification)
-                prefs.edit().putString("last_id", id).apply()
+
+                if (seen.isEmpty()) {
+                    val newest = notifications.getJSONObject(0)
+                    val id = newest.optString("id")
+                    if (id.isNotBlank()) {
+                        showNotification(newest, id)
+                        seen.add(id)
+                    }
+                    for (index in 1 until notifications.length()) {
+                        val id = notifications.getJSONObject(index).optString("id")
+                        if (id.isNotBlank()) seen.add(id)
+                    }
+                } else {
+                    newItems.asReversed().forEach { item ->
+                        val id = item.optString("id")
+                        if (id.isNotBlank()) {
+                            showNotification(item, id)
+                            seen.add(id)
+                        }
+                    }
+                }
+
+                while (seen.size > 100) seen.remove(seen.first())
+                prefs.edit().putStringSet("seen_ids", seen).remove("last_id").apply()
             }
             Result.success()
         }.getOrElse { Result.retry() }
+    }
+
+    private fun showNotification(item: JSONObject, id: String) {
+        val title = item.optString("title", "Kelo ID")
+        val body = item.optString("body", "Nouvelle notification Kelo ID")
+        val targetUrl = item.optString("url", "https://kelo-id.eu/")
+        val intent = Intent(applicationContext, MainActivity::class.java).apply {
+            data = targetUrl.takeIf { it.startsWith("https://kelo-id.eu") || it.startsWith("https://www.kelo-id.eu") }?.let(Uri::parse)
+            flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+        }
+        val pendingIntent = PendingIntent.getActivity(applicationContext, id.hashCode(), intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+        val notification = NotificationCompat.Builder(applicationContext, "kelo_id_general")
+            .setSmallIcon(R.drawable.ic_kelo_id_notification)
+            .setContentTitle(title.take(80))
+            .setContentText(body.take(200))
+            .setStyle(NotificationCompat.BigTextStyle().bigText(body.take(1000)))
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setAutoCancel(true)
+            .setContentIntent(pendingIntent)
+            .build()
+        applicationContext.getSystemService(NotificationManager::class.java).notify(id.hashCode(), notification)
     }
 
     companion object {
