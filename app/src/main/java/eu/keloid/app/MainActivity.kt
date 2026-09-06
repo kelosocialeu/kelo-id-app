@@ -227,6 +227,9 @@ class MainActivity : ComponentActivity() {
         }
 
         @JavascriptInterface
+        fun getFcmToken(): String = KeloFirebaseMessagingService.currentToken(this@MainActivity) ?: ""
+
+        @JavascriptInterface
         fun notify(title: String, body: String, url: String?) {
             runOnUiThread {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && !hasPermission(Manifest.permission.POST_NOTIFICATIONS)) return@runOnUiThread
