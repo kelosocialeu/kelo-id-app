@@ -82,6 +82,12 @@ class MainActivity : ComponentActivity() {
             allowContentAccess = true
             javaScriptCanOpenWindowsAutomatically = false
             setSupportMultipleWindows(false)
+            useWideViewPort = true
+            loadWithOverviewMode = true
+            setSupportZoom(false)
+            builtInZoomControls = false
+            displayZoomControls = false
+            textZoom = 100
             userAgentString = "$userAgentString KeloIDAndroid/1.0"
         }
 
@@ -137,7 +143,7 @@ class MainActivity : ComponentActivity() {
         val request = PeriodicWorkRequestBuilder<KeloNotificationWorker>(15, TimeUnit.MINUTES)
             .setConstraints(KeloNotificationWorker.constraints())
             .build()
-        WorkManager.getInstance(this).enqueueUniquePeriodicWork(KeloNotificationWorker.WORK_NAME, ExistingPeriodicWorkPolicy.KEEP, request)
+        WorkManager.getInstance(this).enqueueUniquePeriodicWork(KeloNotificationWorker.WORK_NAME, ExistingPeriodicWorkPolicy.UPDATE, request)
     }
 
     private fun createNotificationChannel() {
