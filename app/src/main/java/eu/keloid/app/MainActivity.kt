@@ -55,6 +55,7 @@ class MainActivity : ComponentActivity() {
     private var pendingWebPermission: PermissionRequest? = null
     private var pendingFileCallback: ValueCallback<Array<Uri>>? = null
     private var activeNfcOperationId: String? = null
+    private var activeNfcSubjectDid: String? = null
     private var activeNfcCredentials: IdentityAccessCredentials? = null
     private var activeNfcKeyManager: NfcSigningKeyManager? = null
 
@@ -229,7 +230,7 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun enableNfcReader(operationId: String, credentials: IdentityAccessCredentials, keyManager: NfcSigningKeyManager) {
+    private fun enableNfcReader(operationId: String, subjectDid: String, credentials: IdentityAccessCredentials, keyManager: NfcSigningKeyManager) {
         val adapter = nfcAdapter
         if (adapter == null) {
             completeNfcOperation(operationId, error = "Ce téléphone ne possède pas de lecteur NFC compatible.")
@@ -242,6 +243,7 @@ class MainActivity : ComponentActivity() {
         }
 
         activeNfcOperationId = operationId
+        activeNfcSubjectDid = subjectDid
         activeNfcCredentials = credentials
         activeNfcKeyManager = keyManager
         adapter.enableReaderMode(
@@ -256,17 +258,19 @@ class MainActivity : ComponentActivity() {
 
     private fun onNfcTag(tag: Tag) {
         val operationId = activeNfcOperationId ?: return
+        val subjectDid = activeNfcSubjectDid ?: return
         val credentials = activeNfcCredentials ?: return
         val keyManager = activeNfcKeyManager ?: return
         runCatching { nfcAdapter?.disableReaderMode(this) }
         activeNfcOperationId = null
+        activeNfcSubjectDid = null
         activeNfcCredentials = null
         activeNfcKeyManager = null
 
         nfcScope.launch {
             runCatching {
                 val identity = IcaoMrtdReader(this@MainActivity).read(tag, credentials)
-                NfcProofBuilder(keyManager).build(credentials.subjectDid, identity)
+                NfcProofBuilder(keyManager).build(subjectDid, identity)
             }.onSuccess { proof ->
                 val result = JSONObject()
                     .put("payload", proof.payload)
@@ -333,8 +337,8 @@ class MainActivity : ComponentActivity() {
                 birthDate = birthDate,
                 expiryDate = expiryDate,
                 can = can
-            ).also { it.subjectDid = subjectDid }
-            enableNfcReader(operationId, credentials, NfcSigningKeyManager())
+            )
+            enableNfcReader(operationId, subjectDid, credentials, NfcSigningKeyManager())
             return operationId
         }
     }
