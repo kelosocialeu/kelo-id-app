@@ -6,9 +6,11 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Color
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.view.View
 import android.webkit.CookieManager
 import android.webkit.JavascriptInterface
 import android.webkit.PermissionRequest
@@ -21,6 +23,10 @@ import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.ExistingWorkPolicy
 import androidx.work.OneTimeWorkRequestBuilder
@@ -50,6 +56,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        configureSystemBars()
         createNotificationChannel()
         requestNotificationPermission()
         scheduleNotificationWorker()
@@ -70,9 +77,35 @@ class MainActivity : ComponentActivity() {
         handleIncomingIntent(intent)
     }
 
+    private fun configureSystemBars() {
+        // Kelo ID must occupy only the safe area between Android's status bar and
+        // navigation/gesture area. This also fixes Android 15 edge-to-edge behavior.
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        window.statusBarColor = Color.WHITE
+        window.navigationBarColor = Color.WHITE
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            window.isNavigationBarContrastEnforced = false
+        }
+        WindowInsetsControllerCompat(window, window.decorView).apply {
+            isAppearanceLightStatusBars = true
+            isAppearanceLightNavigationBars = true
+        }
+    }
+
     private fun setupWebView() {
         webView = WebView(this)
-        webView.setBackgroundColor(0x00000000)
+        webView.setBackgroundColor(Color.WHITE)
+
+        // Android 15 targets are edge-to-edge by default. Apply the real system
+        // bar insets to the WebView so the Kelo ID website starts below the
+        // clock/notification strip and ends above the Android navigation area.
+        ViewCompat.setOnApplyWindowInsetsListener(webView) { view, insets ->
+            val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            view.setPadding(bars.left, bars.top, bars.right, bars.bottom)
+            insets
+        }
+        ViewCompat.requestApplyInsets(webView)
+
         webView.addJavascriptInterface(AndroidNotificationBridge(), "KeloAndroidNotifications")
 
         with(webView.settings) {
@@ -166,8 +199,6 @@ class MainActivity : ComponentActivity() {
         fun setSubjectDid(did: String) {
             if (!did.startsWith("did:")) return
             getSharedPreferences("kelo_notifications", MODE_PRIVATE).edit().putString("subject_did", did).apply()
-            // The worker is also scheduled when the DID becomes known, so closing Kelo ID
-            // does not stop notification polling after the initial login.
             scheduleNotificationWorker()
         }
 
