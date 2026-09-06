@@ -10,7 +10,6 @@ import android.graphics.Color
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
-import android.view.View
 import android.webkit.CookieManager
 import android.webkit.JavascriptInterface
 import android.webkit.PermissionRequest
@@ -32,6 +31,7 @@ import androidx.work.ExistingWorkPolicy
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
+import com.google.firebase.messaging.FirebaseMessaging
 import java.util.concurrent.TimeUnit
 
 class MainActivity : ComponentActivity() {
@@ -59,6 +59,7 @@ class MainActivity : ComponentActivity() {
         configureSystemBars()
         createNotificationChannel()
         requestNotificationPermission()
+        initializeFirebaseMessaging()
         scheduleNotificationWorker()
         setupWebView()
         setContentView(webView)
@@ -78,14 +79,10 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun configureSystemBars() {
-        // Kelo ID must occupy only the safe area between Android's status bar and
-        // navigation/gesture area. This also fixes Android 15 edge-to-edge behavior.
         WindowCompat.setDecorFitsSystemWindows(window, false)
         window.statusBarColor = Color.WHITE
         window.navigationBarColor = Color.WHITE
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            window.isNavigationBarContrastEnforced = false
-        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) window.isNavigationBarContrastEnforced = false
         WindowInsetsControllerCompat(window, window.decorView).apply {
             isAppearanceLightStatusBars = true
             isAppearanceLightNavigationBars = true
@@ -95,10 +92,6 @@ class MainActivity : ComponentActivity() {
     private fun setupWebView() {
         webView = WebView(this)
         webView.setBackgroundColor(Color.WHITE)
-
-        // Android 15 targets are edge-to-edge by default. Apply the real system
-        // bar insets to the WebView so the Kelo ID website starts below the
-        // clock/notification strip and ends above the Android navigation area.
         ViewCompat.setOnApplyWindowInsetsListener(webView) { view, insets ->
             val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
             view.setPadding(bars.left, bars.top, bars.right, bars.bottom)
@@ -163,6 +156,17 @@ class MainActivity : ComponentActivity() {
         webView.loadUrl("https://kelo-id.eu/")
     }
 
+    private fun initializeFirebaseMessaging() {
+        runCatching {
+            FirebaseMessaging.getInstance().token
+                .addOnSuccessListener { token ->
+                    getSharedPreferences("kelo_notifications", MODE_PRIVATE).edit().putString("fcm_token", token).apply()
+                    KeloFirebaseMessagingService.registerToken(this)
+                    disableNotificationWorker()
+                }
+        }
+    }
+
     private fun handleIncomingIntent(intent: Intent?) {
         val uri = intent?.data ?: return
         val host = uri.host?.lowercase()
@@ -178,11 +182,15 @@ class MainActivity : ComponentActivity() {
         val workManager = WorkManager.getInstance(this)
         val immediateRequest = OneTimeWorkRequestBuilder<KeloNotificationWorker>().build()
         workManager.enqueueUniqueWork(KeloNotificationWorker.IMMEDIATE_WORK_NAME, ExistingWorkPolicy.REPLACE, immediateRequest)
-
         val periodicRequest = PeriodicWorkRequestBuilder<KeloNotificationWorker>(15, TimeUnit.MINUTES)
             .setConstraints(KeloNotificationWorker.constraints())
             .build()
         workManager.enqueueUniquePeriodicWork(KeloNotificationWorker.WORK_NAME, ExistingPeriodicWorkPolicy.UPDATE, periodicRequest)
+    }
+
+    private fun disableNotificationWorker() {
+        WorkManager.getInstance(this).cancelUniqueWork(KeloNotificationWorker.WORK_NAME)
+        WorkManager.getInstance(this).cancelUniqueWork(KeloNotificationWorker.IMMEDIATE_WORK_NAME)
     }
 
     private fun createNotificationChannel() {
@@ -199,7 +207,9 @@ class MainActivity : ComponentActivity() {
         fun setSubjectDid(did: String) {
             if (!did.startsWith("did:")) return
             getSharedPreferences("kelo_notifications", MODE_PRIVATE).edit().putString("subject_did", did).apply()
-            scheduleNotificationWorker()
+            KeloFirebaseMessagingService.registerToken(this@MainActivity)
+            if (getSharedPreferences("kelo_notifications", MODE_PRIVATE).getString("fcm_token", null).isNullOrBlank()) scheduleNotificationWorker()
+            else disableNotificationWorker()
         }
 
         @JavascriptInterface
