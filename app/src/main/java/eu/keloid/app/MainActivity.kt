@@ -3,12 +3,14 @@ package eu.keloid.app
 import android.Manifest
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.webkit.CookieManager
+import android.webkit.JavascriptInterface
 import android.webkit.PermissionRequest
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
@@ -36,7 +38,6 @@ class MainActivity : ComponentActivity() {
         val needsAudio = request.resources.contains(PermissionRequest.RESOURCE_AUDIO_CAPTURE)
         val cameraGranted = !needsCamera || results[Manifest.permission.CAMERA] == true || hasPermission(Manifest.permission.CAMERA)
         val audioGranted = !needsAudio || results[Manifest.permission.RECORD_AUDIO] == true || hasPermission(Manifest.permission.RECORD_AUDIO)
-
         if (cameraGranted && audioGranted) request.grant(request.resources) else request.deny()
     }
 
@@ -76,6 +77,7 @@ class MainActivity : ComponentActivity() {
     private fun setupWebView() {
         webView = WebView(this)
         webView.setBackgroundColor(0x00000000)
+        webView.addJavascriptInterface(AndroidNotificationBridge(), "KeloAndroidNotifications")
 
         with(webView.settings) {
             javaScriptEnabled = true
@@ -173,14 +175,42 @@ class MainActivity : ComponentActivity() {
                 "kelo_id_general",
                 "Kelo ID",
                 NotificationManager.IMPORTANCE_DEFAULT
-            ).apply {
-                description = "Notifications importantes de Kelo ID"
-            }
+            ).apply { description = "Notifications importantes de Kelo ID" }
         )
     }
 
     private fun hasPermission(permission: String): Boolean =
         ContextCompat.checkSelfPermission(this, permission) == PackageManager.PERMISSION_GRANTED
+
+    private inner class AndroidNotificationBridge {
+        @JavascriptInterface
+        fun notify(title: String, body: String, url: String?) {
+            runOnUiThread {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && !hasPermission(Manifest.permission.POST_NOTIFICATIONS)) return@runOnUiThread
+                val target = Intent(this@MainActivity, MainActivity::class.java).apply {
+                    data = url?.takeIf { it.startsWith("https://kelo-id.eu") || it.startsWith("https://www.kelo-id.eu") }?.let(Uri::parse)
+                }
+                val pendingIntent = PendingIntent.getActivity(
+                    this@MainActivity,
+                    1001,
+                    target,
+                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                )
+                val notification = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    android.app.Notification.Builder(this@MainActivity, "kelo_id_general")
+                } else {
+                    android.app.Notification.Builder(this@MainActivity)
+                }
+                    .setSmallIcon(android.R.drawable.ic_dialog_info)
+                    .setContentTitle(title.take(80))
+                    .setContentText(body.take(200))
+                    .setAutoCancel(true)
+                    .setContentIntent(pendingIntent)
+                    .build()
+                getSystemService(NotificationManager::class.java).notify(title.hashCode(), notification)
+            }
+        }
+    }
 
     override fun onDestroy() {
         pendingWebPermission?.deny()
@@ -188,6 +218,7 @@ class MainActivity : ComponentActivity() {
         pendingFileCallback?.onReceiveValue(null)
         pendingFileCallback = null
         if (::webView.isInitialized) {
+            webView.removeJavascriptInterface("KeloAndroidNotifications")
             webView.stopLoading()
             webView.webChromeClient = null
             webView.webViewClient = null
