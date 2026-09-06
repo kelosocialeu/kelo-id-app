@@ -107,6 +107,7 @@ class KeloNotificationWorker(appContext: Context, params: WorkerParameters) : Co
 
     companion object {
         const val WORK_NAME = "kelo-id-notifications"
+        const val IMMEDIATE_WORK_NAME = "kelo-id-notifications-immediate"
         fun constraints() = Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build()
     }
 }
