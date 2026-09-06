@@ -10,13 +10,26 @@
     <application
         android:allowBackup="false"
         android:label="Kelo ID"
-        android:icon="@drawable/ic_kelo_id_launcher"
-        android:roundIcon="@drawable/ic_kelo_id_launcher"
+        android:icon="@drawable/kelo_id_logo"
+        android:roundIcon="@drawable/kelo_id_logo"
         android:usesCleartextTraffic="false"
         android:theme="@style/Theme.KeloID">
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_icon"
+            android:resource="@drawable/ic_kelo_id_notification" />
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_color"
+            android:resource="@color/kelo_id_primary" />
         <provider android:name="androidx.core.content.FileProvider" android:authorities="${applicationId}.files" android:exported="false" android:grantUriPermissions="true">
             <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/file_paths" />
         </provider>
+        <service
+            android:name=".KeloFirebaseMessagingService"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
         <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
